@@ -348,7 +348,7 @@ NetSocket::NetSocket(){
 	// barring UDP port conflicts with other applications (which are quite possible). We use the range from
 	// 32768 to 49151 for this purpose.
 	myPortMin = 32768 + (getuid() % 4096)*4;
-	myPortMax = myPortMin + 3;
+	myPortMax = myPortMin + 4; // Edit to support 5 max users!
 
 }
 
