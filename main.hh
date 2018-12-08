@@ -21,6 +21,11 @@
 #define SEQNOSTART 1
 #define QINT64MAX std::numeric_limits<qint64>::max()
 
+#define LEADER 1
+#define CANDIDATE 2
+#define FOLLOWER 3
+#define HEARTBEATTIME 50
+
 class NetSocket : public QUdpSocket
 {
     Q_OBJECT
@@ -42,6 +47,12 @@ public:
 public slots:
 	void gotReturnPressed();
     void processPendingDatagrams();
+
+
+    void sendRequestForVotes();
+    void heartbeat();
+
+    // OLD
     void antiEntropy();
     void resendRumor();
 
@@ -49,6 +60,37 @@ private:
 	QTextEdit *textview;
 	QLineEdit *textline;
 
+    quint16 myCandidateId;
+    quint16 myRole = FOLLOWER;
+    quint16 myLeader = -1;
+    quint16 votedFor = -1;
+    quint16 lastTermIVotedTrueIn = -1;
+
+    quint16 timeToWaitForHeartbeat;
+	QTimer *waitForHeartbeatTimer;
+    QTimer *sendHeartbeatTimer;
+
+    quint16 lastLogIndex=0;
+    quint16 lastLogTerm=0;
+    quint16 currentTerm=0;
+
+    QList<quint16> nodesThatVotedForMe;
+
+    // List of (message, term) pairs
+    QList<QPair<QString, quint16>> committedMsgs;
+
+    //QMap<quint32, QList> uncommittedMsgs;
+
+
+    void sendMessageToAll(QVariantMap msgMap);
+    void processRequestVote(QVariantMap msg, quint16 sourcePort);
+    void processReplyRequestVote(QVariantMap inMap, quint16 sourcePort);
+    void sendAppendEntriesMsg();
+    void processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort);
+    void processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourcePort);
+
+
+	// OLD CODE
     QTimer *resendTimer;
     QTimer *antiEntropyTimer;
     QElapsedTimer *n1Timer = nullptr;
