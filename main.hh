@@ -47,10 +47,8 @@ public:
 public slots:
 	void gotReturnPressed();
     void processPendingDatagrams();
-
-
     void sendRequestForVotes();
-    void heartbeat();
+    void sendHeartbeat();
 
     // OLD
     void antiEntropy();
@@ -62,9 +60,9 @@ private:
 
     quint16 myCandidateId;
     quint16 myRole = FOLLOWER;
-    quint16 myLeader = -1;
-    quint16 votedFor = -1;
-    quint16 lastTermIVotedTrueIn = -1;
+    qint16 myLeader = -1;
+    qint16 votedFor = -1;
+
 
     quint16 timeToWaitForHeartbeat;
 	QTimer *waitForHeartbeatTimer;
@@ -72,22 +70,46 @@ private:
 
     quint16 lastLogIndex=0;
     quint16 lastLogTerm=0;
+    quint16 commitIndex=0; // SAFE TO START AT 0? // When am I updating this???
     quint16 currentTerm=0;
 
     QList<quint16> nodesThatVotedForMe;
+    QMap<quint16, quint16> nextIndex;
 
-    // List of (message, term) pairs
-    QList<QPair<QString, quint16>> committedMsgs;
+    // List of (message, (messageID, term)) pairs
+    QList<QPair<QString, QPair<QString, quint16>>> log;
+    QList<QString> stateMachine;
+    QList<QPair<QString, QPair<QString, quint16>>> queuedClientRequests;
 
-    //QMap<quint32, QList> uncommittedMsgs;
+
+    QList<quint16> nodesThatVotedForCommit;
+
+
+
+
+
+    QList<QPair<QString, quint16>> committedMsgs; //commands
+    QList<QPair<QString, quint16>> uncommittedMsgs;
+
+
+    // add var to store chat (state machine)
+
+    // List of (origin port + seqno, message) pairs
+    //QList<QPair<QString, QString>> clientMsgs;
 
 
     void sendMessageToAll(QVariantMap msgMap);
     void processRequestVote(QVariantMap msg, quint16 sourcePort);
+    void replyToRequestForVote(bool voteGranted, quint16 sourcePort);
+
     void processReplyRequestVote(QVariantMap inMap, quint16 sourcePort);
-    void sendAppendEntriesMsg();
+
+    void sendAppendEntriesMsg(quint16 prevLogIndex, quint16 destPort);
     void processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort);
     void processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourcePort);
+
+    void attemptToCommitMsg();
+    void refreshTextView();
 
 
 	// OLD CODE
