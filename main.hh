@@ -19,12 +19,12 @@
 
 // We start Seq No at 1 because an empty entry in QVariantMap returns 0
 #define SEQNOSTART 1
-#define QINT64MAX std::numeric_limits<qint64>::max()
+#define QINT64MAX std::numeric_limits<qint64>::max() //still need this?
 
 #define LEADER 1
 #define CANDIDATE 2
 #define FOLLOWER 3
-#define HEARTBEATTIME 50
+#define HEARTBEATTIME 50 //msec
 
 class NetSocket : public QUdpSocket
 {
@@ -50,9 +50,7 @@ public slots:
     void sendRequestForVotes();
     void sendHeartbeat();
 
-    // OLD
-    void antiEntropy();
-    void resendRumor();
+
 
 private:
 	QTextEdit *textview;
@@ -62,7 +60,6 @@ private:
     quint16 myRole = FOLLOWER;
     qint16 myLeader = -1;
     qint16 votedFor = -1;
-
 
     quint16 timeToWaitForHeartbeat;
 	QTimer *waitForHeartbeatTimer;
@@ -86,35 +83,25 @@ private:
 
     // List of (message, (messageID, term)) pairs
     QList<QPair<QString, QPair<QString, quint16>>> log;
-    QList<QString> stateMachine;
     QList<QPair<QString, QPair<QString, quint16>>> queuedClientRequests;
 
+    QList<QString> stateMachine;
 
 
 
-
-    QList<QPair<QString, quint16>> committedMsgs; //commands
-    QList<QPair<QString, quint16>> uncommittedMsgs;
-
-
-    // add var to store chat (state machine)
-
-    // List of (origin port + seqno, message) pairs
-    //QList<QPair<QString, QString>> clientMsgs;
 
 
     void sendMessageToAll(QVariantMap msgMap);
     void processRequestVote(QVariantMap msg, quint16 sourcePort);
     void replyToRequestForVote(bool voteGranted, quint16 sourcePort);
-
     void processReplyRequestVote(QVariantMap inMap, quint16 sourcePort);
+
 
     void sendAppendEntriesMsg(quint16 prevLogIndex, quint16 destPort);
     void processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort);
     void processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourcePort);
-
-
     void replyToAppendEntries(bool success, quint16 sourcePort);
+
 
     void attemptToCommitMsg();
     void refreshTextView();
@@ -123,36 +110,12 @@ private:
 	// OLD CODE
     quint16 myPort;
     quint32 mySeqNo;
-
-
-    QTimer *resendTimer;
-    QTimer *antiEntropyTimer;
-    QElapsedTimer *n1Timer = nullptr;
-    QElapsedTimer *n2Timer = nullptr;
-    qint64 n1Time = QINT64MAX;
-    qint64 n2Time = QINT64MAX;
-
-    QString myOrigin;
-
-    // chatLogs: <Origin, <SeqNo, Message>>
-    QMap<QString, QMap<quint32, QString>> chatLogs;
-
-    // statusMap: <Origin, QVariant(LastSeqNo + 1)>
-    QVariantMap statusMap;
-
-    // Last sent rumor message
-    quint16 lastRumorPort;
-    QString lastRumorOrigin;
-    quint32 lastRumorSeqNo;
-
-    quint16 pickClosestNeighbor();
-    quint16 pickRandomNeighbor();
-    void sendRumorMessage(QString origin, quint32 seqNo, quint16 destPort);
     void serializeMessage(QVariantMap &myMap, quint16 destPort);
     void deserializeMessage(QByteArray datagram);
-    void receiveRumorMessage(QVariantMap inMap, quint16 sourcePort);
-    void sendStatusMessage(quint16 destPort);
-    void receiveStatusMessage(QVariantMap inMap, quint16 sourcePort);
+
+
+
+
 
 };
 

@@ -53,7 +53,7 @@ ChatDialog::ChatDialog(){
 
 }
 
-/* Called by follower who's waitForHeartbeatTimer timed out. Starts a new election */
+/* Called by follower whose waitForHeartbeatTimer timed out. Starts a new election */
 void ChatDialog::sendRequestForVotes(){
 
     qDebug() << "Attempting to become leader!";
@@ -183,7 +183,7 @@ void ChatDialog::processReplyRequestVote(QVariantMap inMap, quint16 sourcePort){
     currentTerm = termFromReply;
 }
 
-/* Called by leader to attempt to commit most recent entry in log */
+/* Called by leader to replicate its log onto its followers */
 void ChatDialog::sendAppendEntriesMsg(quint16 prevLogIndex, quint16 destPort){ //THIS NEEDS PARAMETERS
 
     QVariantMap outMap;
@@ -212,11 +212,9 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
     // Received something from a leader, reset heartbeat timer
     waitForHeartbeatTimer->start(timeToWaitForHeartbeat);
 
-
-
     // Load parameters from message
     quint16 leaderTerm = inMap["term"].toInt();
-    qint16 leaderID = inMap["leaderID"].toInt();
+    qint16  leaderID = inMap["leaderID"].toInt();
     quint16 leaderPrevLogIndex = inMap["prevLogIndex"].toInt();
     quint16 leaderPrevLogTerm = inMap["prevLogTerm"].toInt();
     quint16 leaderCommit = inMap["leaderCommit"].toInt();
@@ -226,10 +224,6 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
         // return; // ????
     }
 
-    qDebug() << "A";
-    qDebug() << "Leader term: " + QString::number(leaderTerm);
-    qDebug() << "current term: " + QString::number(currentTerm);
-
     // If I believe this is from a real leader and not an obsolete leader...
     if(leaderTerm >= currentTerm) {
         votedFor = -1; // The previous election we voted in is over, reset votedFor so we can vote in the next election
@@ -237,10 +231,6 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
         myRole = FOLLOWER;
         myLeader = sourcePort;
     }
-
-    qDebug() << "B";
-    qDebug() << "Leader term: " + QString::number(leaderTerm);
-    qDebug() << "current term: " + QString::number(currentTerm);
 
     if(leaderTerm < currentTerm){
         qDebug() << "Denied Append Entries because my current term > leader term";
@@ -360,30 +350,22 @@ void ChatDialog::processPendingDatagrams(){
 void ChatDialog::gotReturnPressed(){
 
 
-
-
     // NEED TO PARSE FOR SUPPORT COMMANDS
 
 
-
-
     // Store "Client" request
-
     QString messageID = QString(myPort) + QString(mySeqNo);
     mySeqNo++;
-
     QString message = QString::number(myPort) + ": " + textline->text();
-
     queuedClientRequests.append(qMakePair(message, qMakePair(messageID, currentTerm)));
+    textline->clear();
+
+    // ???????
 
     if(myRole == LEADER){
 
-
         attemptToCommitMsg();
     }
-
-
-
 
     else{    // I AM A CLIENT
 
@@ -396,10 +378,8 @@ void ChatDialog::gotReturnPressed(){
 
 
 
+
     }
-
-
-    textline->clear();
 }
 
 void ChatDialog::attemptToCommitMsg(){
@@ -444,7 +424,7 @@ void ChatDialog::attemptToCommitMsg(){
 void ChatDialog::sendHeartbeat(){
 
     qDebug() << "Sending heartbeat as leader";
-    qDebug() << "My term is: " + QString::number(currentTerm);
+    //qDebug() << "My term is: " + QString::number(currentTerm);
 
     QVariantMap outMap;
     outMap.insert(QString("type"), QVariant(QString("appendEntries")));
@@ -488,236 +468,13 @@ void ChatDialog::sendMessageToAll(QVariantMap msgMap){
     }
 }
 
-/* ---------------------------------------------------------------------------------------------------------*/
-// PURGATORY OF OLD CODE ///
-
-quint16 ChatDialog::pickClosestNeighbor(){
-
-    return -1;
-
-    qDebug() << "Picking closest neighbor";
-
-    int maxAttempts = 10;
-    quint16 neighborPort;
-
-    if(myPort == mySocket->myPortMin)
-        neighborPort = myPort+1;
-
-    else if(myPort == mySocket->myPortMax)
-        neighborPort = myPort-1;
-
-    // Send ping, collect ping reply to determine which neighbor is closer
-    else{
-        quint16 n1 = myPort - 1;
-        quint16 n2 = myPort + 1;
-
-        n1Timer = new QElapsedTimer();
-        n1Timer->start();
-        n2Timer = new QElapsedTimer();
-        n2Timer->start();
-
-        QVariantMap pingMapN1, pingMapN2;
-        pingMapN1.insert(QString("Ping"), QVariant(1));
-        pingMapN2.insert(QString("Ping"), QVariant(2));
-
-        // It's possible to NOT get a response from one neighbor or both neighbors.
-        // Need max attempts in case both neighbors are down or else hangs forever.
-        int attempts = 0;
-        while (n1Time == QINT64MAX && n2Time == QINT64MAX && attempts <= maxAttempts) {
-            qDebug() << "Sending pings to both neighbors";
-            serializeMessage(pingMapN1, n1);
-            serializeMessage(pingMapN2, n2);
-            processPendingDatagrams();
-
-            // Sleep for 0.1 seconds to allow for time for ping reply
-            usleep(100);
-            attempts++;
-        }
-
-        qDebug() << "N1 response took" << QString::number(n1Time) << "milliseconds";
-        qDebug() << "N2 response took" << QString::number(n2Time) << "milliseconds";
-
-        if(attempts == maxAttempts)
-            neighborPort = pickRandomNeighbor();
-        else if (n1Time < n2Time)
-            neighborPort = n1;
-        else
-            neighborPort = n2;
-
-        // Reset timer states
-        attempts =0;
-        delete n1Timer;
-        delete n2Timer;
-        n1Timer = nullptr;
-        n2Timer = nullptr;
-        n1Time = QINT64MAX;
-        n2Time = QINT64MAX;
-    }
-    qDebug() << "Picked neighbor" << QString::number(neighborPort);
-    return neighborPort;
-}
-
-quint16 ChatDialog::pickRandomNeighbor() {
-
-    return -1;
-
-    quint16 neighborPort;
-
-    if(myPort == mySocket->myPortMin)
-        neighborPort = myPort+1;
-
-    else if(myPort == mySocket->myPortMax)
-        neighborPort = myPort-1;
-
-    else if (qrand() % 2 == 0)
-        neighborPort = myPort+1;
-
-    else
-        neighborPort = myPort-1;
-
-    //qDebug() << "Picked neighbor " + QString::number(neighborPort);
-    return neighborPort;
-}
-
-void ChatDialog::sendRumorMessage(QString origin, quint32 seqNo, quint16 destPort){
-
-	if(!chatLogs.contains(origin) || !chatLogs[origin].contains(seqNo))
-		return;
-
-	QVariantMap rumorMap;
-	rumorMap.insert(QString("ChatText"), chatLogs[origin].value(seqNo));
-	rumorMap.insert(QString("Origin"), origin);
-	rumorMap.insert(QString("SeqNo"), seqNo);
-
-	qDebug() << "Sending Origin/seqNo " + origin + "/" + QString::number(seqNo) + " to: " + QString::number(destPort);
-
-	serializeMessage(rumorMap, destPort);
-
-    // Start Timer looking for response
-    resendTimer->start(2000);
-    lastRumorPort = destPort;
-    lastRumorOrigin = origin;
-    lastRumorSeqNo = seqNo;
-}
-
-void ChatDialog::antiEntropy() {
-    //qDebug() << "Anti Entropy!";
-    sendStatusMessage(pickRandomNeighbor());
-}
-
-void ChatDialog::resendRumor(){
-    qDebug() << "Resending rumor because no status message reply!";
-    sendRumorMessage(lastRumorOrigin, lastRumorSeqNo, lastRumorPort);
-}
-
-void ChatDialog::receiveRumorMessage(QVariantMap inMap, quint16 sourcePort){
-
-    QString origin = inMap.value("Origin").value <QString> ();
-	quint32 seqNo = inMap.value("SeqNo").value <quint32> ();
-	QString msg = inMap.value("ChatText").value <QString> ();
-
-    qDebug() << "I got a rumor message: " + msg + " from: " + QString::number(sourcePort);
-
-	QMap<quint32, QString> chatLogEntry;
-	chatLogEntry.insert(seqNo, msg);
-
-	// For convenience, do not store any message with OOO seq number but reply with status message
-	// If chatLogs does not contain messages from this origin, we expect message with seqNo 1
-	if(!chatLogs.contains(origin)){
-		if(seqNo != SEQNOSTART) {
-            sendStatusMessage(sourcePort);
-            sendRumorMessage(origin, seqNo, pickRandomNeighbor());
-            return;
-        }
-
-        chatLogs.insert(origin, chatLogEntry);
-        statusMap.insert(origin, QVariant(seqNo + 1));
-        textview->append(origin + ": " + msg);
-
-	}
-	//If chatLogs *does* contain this origin, we expect message with seqNo = last seq num + 1
-	else{
-		quint32 lastSeqNum = chatLogs[origin].keys().last();
-
-		if (seqNo == lastSeqNum + 1){
-			chatLogs[origin].insert(seqNo, msg);
-			statusMap[origin] = QVariant(seqNo + 1);
-			textview->append(origin + ": " + msg);
-		}
-	}
-	sendStatusMessage(sourcePort);
-	sendRumorMessage(origin, seqNo, pickRandomNeighbor());
-}
-
-void ChatDialog::sendStatusMessage(quint16 destPort){
-
-	QVariantMap statusMessage;
-	statusMessage.insert(QString("Want"), statusMap);
-	serializeMessage(statusMessage, destPort);
-
-}
-
-void ChatDialog::receiveStatusMessage(QVariantMap inMap, quint16 sourcePort){
-
-	QVariantMap recvStatusMap = inMap["Want"].value <QVariantMap> ();
-	QList<QString> recvOriginList = recvStatusMap.keys();
-    QList<QString> myOriginList = statusMap.keys();
-
-    //qDebug() << "I got a status message from: " + QString::number(sourcePort);
-    //qDebug() << "recvStatusMap: " << recvStatusMap;
-    //qDebug() << "myStatusMap: " << statusMap;
-
-	for(int i=0; i < myOriginList.count(); i++){
-	    if(!recvOriginList.contains(myOriginList[i])) {
-            sendRumorMessage(myOriginList[i], SEQNOSTART, sourcePort);
-            return;
-        }
-	}
-
-	for(int i=0; i< recvOriginList.count(); i++){
-
-	    quint32 sourceSeqNoForOrigin = recvStatusMap[recvOriginList[i]].value <quint32> ();
-	    quint32 mySeqNoForOrigin = statusMap[recvOriginList[i]].value <quint32> ();
-
-        if(sourceSeqNoForOrigin == mySeqNoForOrigin)
-            continue;
-
-        else if(sourceSeqNoForOrigin > mySeqNoForOrigin) {
-            sendStatusMessage(sourcePort);
-            return;
-        }
-
-        else if(sourceSeqNoForOrigin < mySeqNoForOrigin) {
-
-            // 0 means sourceMap is empty for this Origin since seqNo starts at 1!
-            if(sourceSeqNoForOrigin == 0)
-                sendRumorMessage(recvOriginList[i], SEQNOSTART, sourcePort);
-            else
-                sendRumorMessage(recvOriginList[i], sourceSeqNoForOrigin, sourcePort);
-            return;
-        }
-    }
-
-    // Neither peer appears to have any messages the other has not yet seen.
-    // Flip a coin: pick new random neighbor to start rumormongering with or ceases the rumormongering process.
-    if (qrand() % 2 == 0){
-        sendStatusMessage(pickRandomNeighbor());
-    }
-}
-
-
-
-
-// BASE CODE
-
-/* Pick a range of four UDP ports to try to allocate by default, computed based on my Unix user ID.*/
+/* Pick a range of five UDP ports to try to allocate by default, computed based on my Unix user ID.*/
 NetSocket::NetSocket(){
-	// This makes it trivial for up to four P2Papp instances per user to find each other on the same host,
+	// This makes it trivial for up to five P2Papp instances per user to find each other on the same host,
 	// barring UDP port conflicts with other applications (which are quite possible). We use the range from
-	// 32768 to 49151 for this purpose.
+	// 32768 to 49152 for this purpose.
 	myPortMin = 32768 + (getuid() % 4096)*4;
-	myPortMax = myPortMin + 4; // Edit to support 5 max users!
-
+	myPortMax = myPortMin + 4; // Edited to support 5 max users!
 }
 
 /* Bind one of ports between myPortMin and myPortMax */
