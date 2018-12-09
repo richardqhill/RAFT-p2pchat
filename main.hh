@@ -74,15 +74,20 @@ private:
     quint16 currentTerm=0;
 
     QList<quint16> nodesThatVotedForMe;
+
+    // <Server, next log entry to send to that server>
     QMap<quint16, quint16> nextIndex;
+
+    // <Server, highest log entry known to be replicated on server>
+    QMap<quint16, quint16> matchIndex;
+
+
+
 
     // List of (message, (messageID, term)) pairs
     QList<QPair<QString, QPair<QString, quint16>>> log;
     QList<QString> stateMachine;
     QList<QPair<QString, QPair<QString, quint16>>> queuedClientRequests;
-
-
-    QList<quint16> nodesThatVotedForCommit;
 
 
 
@@ -108,11 +113,18 @@ private:
     void processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort);
     void processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourcePort);
 
+
+    void replyToAppendEntries(bool success, quint16 sourcePort);
+
     void attemptToCommitMsg();
     void refreshTextView();
 
 
 	// OLD CODE
+    quint16 myPort;
+    quint32 mySeqNo;
+
+
     QTimer *resendTimer;
     QTimer *antiEntropyTimer;
     QElapsedTimer *n1Timer = nullptr;
@@ -120,9 +132,7 @@ private:
     qint64 n1Time = QINT64MAX;
     qint64 n2Time = QINT64MAX;
 
-    quint16 myPort;
     QString myOrigin;
-    quint32 mySeqNo;
 
     // chatLogs: <Origin, <SeqNo, Message>>
     QMap<QString, QMap<quint32, QString>> chatLogs;
