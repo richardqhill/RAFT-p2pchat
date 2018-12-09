@@ -56,38 +56,42 @@ private:
 	QTextEdit *textview;
 	QLineEdit *textline;
 
+    quint16 timeToWaitForHeartbeat;
+    QTimer *waitForHeartbeatTimer;
+    QTimer *sendHeartbeatTimer;
+
     quint16 myCandidateId;
+    quint16 myCurrentTerm = 0;
     quint16 myRole = FOLLOWER;
+    // Used by candidate in election
+    QList<quint16> nodesThatVotedForMe;
+
     qint16 myLeader = -1;
     qint16 votedFor = -1;
 
-    quint16 timeToWaitForHeartbeat;
-	QTimer *waitForHeartbeatTimer;
-    QTimer *sendHeartbeatTimer;
+    qint16 myLastLogIndex = -1; //I'm thinking start these at negative 1
+    qint16 myLastLogTerm = -1;
+    qint16 myCommitIndex = -1; // SAFE TO START AT 0? // When am I updating this???
 
-    quint16 lastLogIndex=0;
-    quint16 lastLogTerm=0;
-    quint16 commitIndex=0; // SAFE TO START AT 0? // When am I updating this???
-    quint16 currentTerm=0;
 
-    QList<quint16> nodesThatVotedForMe;
+    // Log entry should be QVariantMap that stores messageID, term, and message
+    // messageID = concat(myPort, mySeqNo)
+    QVariantList log;
+    QVariantList queuedClientRequests;
+
+
+
+    // After commands are committed, they are executed i.e. messages are appended
+    // to the state machine
+    QList<QString> stateMachine;
 
     // <Server, next log entry to send to that server>
+    // Used by leader. initializes at, decremented when gets a false
     QMap<quint16, quint16> nextIndex;
 
     // <Server, highest log entry known to be replicated on server>
+    // Used by leader. used to keep track of commit status
     QMap<quint16, quint16> matchIndex;
-
-
-
-
-    // List of (message, (messageID, term)) pairs
-    QList<QPair<QString, QPair<QString, quint16>>> log;
-    QList<QPair<QString, QPair<QString, quint16>>> queuedClientRequests;
-
-    QList<QString> stateMachine;
-
-
 
 
 
@@ -109,12 +113,9 @@ private:
 
 	// OLD CODE
     quint16 myPort;
-    quint32 mySeqNo;
+    quint32 mySeqNo = 1;
     void serializeMessage(QVariantMap &myMap, quint16 destPort);
     void deserializeMessage(QByteArray datagram);
-
-
-
 
 
 };
