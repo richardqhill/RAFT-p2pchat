@@ -57,7 +57,7 @@ private:
 	QLineEdit *textline;
 
     quint16 timeToWaitForHeartbeat;
-    QTimer *waitForHeartbeatTimer;
+    QTimer *electionTimer;
     QTimer *sendHeartbeatTimer;
 
     quint16 myCandidateId;
@@ -70,8 +70,13 @@ private:
     quint16 myCurrentTerm = 0;
     qint16 votedFor = -1;
 
+
+    // should these be calculated every time? IDK
     qint16 myLastLogIndex = 0; //I'm thinking start these at negative 1
     qint16 myLastLogTerm = 0;
+
+
+
     qint16 myCommitIndex = 0; // SAFE TO START AT 0? // When am I updating this???
     qint16 myLastApplied = 0;
 
@@ -106,7 +111,7 @@ private:
     void sendAppendEntriesMsg(quint16 destPort);
 
     void processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort);
-    void replyToAppendEntries(bool success, quint16 sourcePort);
+    void replyToAppendEntries(bool success, quint16 destPort);
     void processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourcePort);
     void updateCommitIndex();
 

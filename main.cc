@@ -6,17 +6,14 @@ ChatDialog::ChatDialog(){
     if(!  mySocket->bind()) {
 		exit(1);
 	}
-    else {
-		myPort = mySocket->port;
-	}
 
-    myCandidateId = myPort;
-	QString myPortString = QString::number(myPort);
+    myPort = mySocket->port;
+	myCandidateId = myPort;
 
-	qDebug() << "myPort: " << myPortString;
+	qDebug() << "myPort: " << QString::number(myPort);
 	qDebug() << "-------------------";
 
-    setWindowTitle("RAFT Chat: " + myPortString);
+    setWindowTitle("RAFT Chat: " + QString::number(myPort));
 
 	textview = new QTextEdit(this);
 	textview->setReadOnly(true);
@@ -40,9 +37,9 @@ ChatDialog::ChatDialog(){
     //timeToWaitForHeartbeat = qrand() % 150 + 150;
     timeToWaitForHeartbeat = qrand() % 150 + 500;  // A little slower for sanity
 
-    waitForHeartbeatTimer = new QTimer(this);
-    connect(waitForHeartbeatTimer, SIGNAL(timeout()), this, SLOT(sendRequestForVotes()));
-    waitForHeartbeatTimer->start(timeToWaitForHeartbeat);
+    electionTimer = new QTimer(this);
+    connect(electionTimer, SIGNAL(timeout()), this, SLOT(sendRequestForVotes()));
+    electionTimer->start(timeToWaitForHeartbeat);
 
     // Timer for leader to keep track of when to send heartbeats.
     // Started when follower becomes leader, timeout defined in header definitions
@@ -59,7 +56,7 @@ void ChatDialog::sendRequestForVotes(){
     myCurrentTerm++;
     nodesThatVotedForMe.clear();
     nodesThatVotedForMe.append(myPort);
-    votedFor = myCandidateId; // probably doesn't matter
+    votedFor = myCandidateId;
     myRole = CANDIDATE;
 
     // Create requestVote message
@@ -84,18 +81,19 @@ void ChatDialog::processRequestVote(QVariantMap inMap, quint16 sourcePort){
     qint16 candidateLastLogIndex = inMap.value("lastLogIndex").toInt();
     qint16 candidateLastLogTerm = inMap.value("lastLogTerm").toInt();
 
-    if(candidateTerm < myCurrentTerm) {
-        qDebug() << "Vote was denied because candidate term is less than mine!";
-        replyToRequestForVote(false, sourcePort);
-        return;
-    }
 
-    // Rules for Servers 5.1: If RPC request or response contains term T > currentTerm,
+    // Rules for All Servers 5.1: If RPC request or response contains term T > currentTerm,
     // set currentTerm = T and convert to follower
     if(candidateTerm > myCurrentTerm){
         myCurrentTerm = candidateTerm;
         myRole = FOLLOWER;
         sendHeartbeatTimer->stop();
+    }
+
+    if(candidateTerm < myCurrentTerm) {
+        qDebug() << "Vote was denied because candidate term is less than mine!";
+        replyToRequestForVote(false, sourcePort);
+        return;
     }
 
     // Check if candidate's log is at least as up-to-date as receiver's log
@@ -108,15 +106,14 @@ void ChatDialog::processRequestVote(QVariantMap inMap, quint16 sourcePort){
 
     if(votedFor == -1 || votedFor == candidateID) {
 
-        // Convert to follower
+        // Convert to follower and vote for candidate
         myRole = FOLLOWER;
         sendHeartbeatTimer->stop();
-
         votedFor = candidateID;
         replyToRequestForVote(true, sourcePort);
 
         // Reset election timer when you grant a vote to another peer
-        waitForHeartbeatTimer->start(timeToWaitForHeartbeat);
+        electionTimer->start(timeToWaitForHeartbeat);
 
         return;
     }
@@ -129,9 +126,6 @@ void ChatDialog::processRequestVote(QVariantMap inMap, quint16 sourcePort){
 
 /* Called by follower to reply to a received RequestVote message */
 void ChatDialog::replyToRequestForVote(bool voteGranted, quint16 sourcePort){
-
-    // reset waitForHeartbeatTimer, according to Raft visual
-    waitForHeartbeatTimer->start(timeToWaitForHeartbeat);
 
     // Send reply to RequestVote
     QVariantMap outMap;
@@ -156,8 +150,17 @@ void ChatDialog::processReplyRequestVote(QVariantMap inMap, quint16 sourcePort){
     quint16 termFromReply = inMap.value("term").toInt();
     bool voteGranted = inMap.value("voteGranted").toBool();
 
-    // If vote is not for the current election, ignore reply
-    if(termFromReply!= myCurrentTerm)
+    // Rules for All Servers 5.1: If RPC request or response contains term T > currentTerm,
+    // set currentTerm = T and convert to follower
+    if(termFromReply > myCurrentTerm){
+        myRole = FOLLOWER;
+        sendHeartbeatTimer->stop();
+        myCurrentTerm = termFromReply;
+        return;
+    }
+
+    // If vote is not for the current election I am running, ignore reply
+    if(termFromReply != myCurrentTerm)
         return;
 
     if(voteGranted){
@@ -165,20 +168,22 @@ void ChatDialog::processReplyRequestVote(QVariantMap inMap, quint16 sourcePort){
             nodesThatVotedForMe.append(sourcePort);
 
         // Check if I have a majority of votes
-        if(nodesThatVotedForMe.length() >= 2){                  //should be 3, changing to 2 for debugging   !!!!
+        if(nodesThatVotedForMe.length() >= 2){        //should be 3, changing to 2 for debugging         !!!!!!!!!
 
             qDebug() << "I became leader!";
 
             myRole = LEADER;
             myLeader = myCandidateId;
 
-            // Initialize next index, which tracks (for each server) the next log entry I should send them
+            // Initialize next index: tracks for each server the next log entry I should send them
             nextIndex.clear();
             for(int i = mySocket->myPortMin; i<= mySocket->myPortMax; i++){
                 if(i!= myPort)
                     nextIndex[i] = myLastLogIndex+1;
             }
 
+            // Initialize match index: tracks for each server the index of highest log entry known
+            // to be replicated on server
             matchIndex.clear();
             for(int i = mySocket->myPortMin; i<= mySocket->myPortMax; i++){
                 if(i!= myPort)
@@ -190,9 +195,6 @@ void ChatDialog::processReplyRequestVote(QVariantMap inMap, quint16 sourcePort){
             sendHeartbeatTimer->start(HEARTBEATTIME);
         }
     }
-    else{ // Vote was denied. I should update my term to term from the reply
-        myCurrentTerm = termFromReply;
-    }
 }
 
 
@@ -201,6 +203,7 @@ void ChatDialog::processReplyRequestVote(QVariantMap inMap, quint16 sourcePort){
 void ChatDialog::sendAppendEntriesMsg(quint16 destPort){
 
     // We have a separate heartbeat function. Calling this function guarantees there is at least one entry in the log
+    // should we?
 
     QVariantMap outMap;
     outMap.insert(QString("type"), QVariant(QString("appendEntries")));
@@ -217,6 +220,7 @@ void ChatDialog::sendAppendEntriesMsg(quint16 destPort){
 
     // prevLogTerm = term of the entry at prevLogIndex (if index 0, return 0)
     quint16 myPrevLogTerm = log.value(prevLogIndex).toMap().value("term").toInt();   // UPDATE
+
     qDebug() << "I think myPrevLogTerm is: " + QString::number(myPrevLogTerm);
 
     outMap.insert(QString("prevLogTerm"), QVariant(myPrevLogTerm));
@@ -244,9 +248,6 @@ void ChatDialog::sendAppendEntriesMsg(quint16 destPort){
 void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
 
 
-
-
-
     // Load parameters from message
     quint16 leaderTerm = inMap.value("term").toInt();
     qint16  leaderID = inMap.value("leaderID").toInt();
@@ -262,17 +263,13 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
         qDebug() << entries;
     }
 
-
     // Only reset election timer if we receive RPC from CURRENT leader
     if(leaderTerm == myCurrentTerm)
-        waitForHeartbeatTimer->start(timeToWaitForHeartbeat);
-
+        electionTimer->start(timeToWaitForHeartbeat);
 
 
     // Debugging!
     //replyToAppendEntries(true, sourcePort);
-
-
 
     return;
 
@@ -327,7 +324,7 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
 }
 
 /* Called by follower to reply to an AppendEntries message from leader */
-void ChatDialog::replyToAppendEntries(bool success, quint16 sourcePort){
+void ChatDialog::replyToAppendEntries(bool success, quint16 destPort){
 
     QVariantMap outMap;
     outMap.insert("type", QVariant("replyToAppendEntries"));
@@ -341,7 +338,7 @@ void ChatDialog::replyToAppendEntries(bool success, quint16 sourcePort){
         outMap.insert("success", QVariant(false));
     }
 
-    serializeMessage(outMap, sourcePort);
+    serializeMessage(outMap, destPort);
 }
 
 
@@ -524,7 +521,7 @@ void ChatDialog::sendHeartbeat(){
     sendMessageToAll(outMap);
 
     // Prevent leader from trying to depose themselves
-    waitForHeartbeatTimer->start(timeToWaitForHeartbeat);
+    electionTimer->start(timeToWaitForHeartbeat);
 }
 
 
