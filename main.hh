@@ -61,17 +61,19 @@ private:
     QTimer *sendHeartbeatTimer;
 
     quint16 myCandidateId;
-    quint16 myCurrentTerm = 0;
     quint16 myRole = FOLLOWER;
     // Used by candidate in election
     QList<quint16> nodesThatVotedForMe;
 
     qint16 myLeader = -1;
+
+    quint16 myCurrentTerm = 0;
     qint16 votedFor = -1;
 
-    qint16 myLastLogIndex = -1; //I'm thinking start these at negative 1
-    qint16 myLastLogTerm = -1;
-    qint16 myCommitIndex = -1; // SAFE TO START AT 0? // When am I updating this???
+    qint16 myLastLogIndex = 0; //I'm thinking start these at negative 1
+    qint16 myLastLogTerm = 0;
+    qint16 myCommitIndex = 0; // SAFE TO START AT 0? // When am I updating this???
+    qint16 myLastApplied = 0;
 
 
     // Log entry should be QVariantMap that stores messageID, term, and message
@@ -101,11 +103,12 @@ private:
     void processReplyRequestVote(QVariantMap inMap, quint16 sourcePort);
 
 
-    void sendAppendEntriesMsg(quint16 prevLogIndex, quint16 destPort);
-    void processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort);
-    void processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourcePort);
-    void replyToAppendEntries(bool success, quint16 sourcePort);
+    void sendAppendEntriesMsg(quint16 destPort);
 
+    void processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort);
+    void replyToAppendEntries(bool success, quint16 sourcePort);
+    void processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourcePort);
+    void updateCommitIndex();
 
     void attemptToCommitMsg();
     void refreshTextView();
