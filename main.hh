@@ -17,12 +17,10 @@
 #include <stdlib.h>
 
 
-// We start Seq No at 1 because an empty entry in QVariantMap returns 0
-#define SEQNOSTART 1
-
 #define LEADER 1
 #define CANDIDATE 2
 #define FOLLOWER 3
+
 #define HEARTBEATTIME 50 //msec
 
 class NetSocket : public QUdpSocket
@@ -73,7 +71,7 @@ private:
     quint16 myCommitIndex = 0; // Everyone has the same dummy entry
     quint16 myLastApplied = 0;
 
-    // Log entry should be QVariantMap that stores messageID, term, and message !!!!
+    // Log entry should be QVariantMap that stores messageID, term, and message
     // messageID = concat(myPort, mySeqNo)
     // Note: at startup, append a "dummy" entry into index 0 of log, so that prevLogIndex checks work
     QVariantList log;
@@ -97,8 +95,6 @@ private:
     QMap<quint16, quint16> matchIndex;
 
 
-
-
     void processRequestVote(QVariantMap msg, quint16 sourcePort);
     void replyToRequestForVote(bool voteGranted, quint16 sourcePort);
     void processReplyRequestVote(QVariantMap inMap, quint16 sourcePort);
@@ -112,7 +108,7 @@ private:
     void processClientRequestFromFollower(QVariantMap inMap);
     void attemptToCommitNextClientRequest();
     void removeMessageIDFromQueuedClientRequests(QString messageID);
-    
+
     void serializeMessage(QVariantMap &myMap, quint16 destPort);
     void sendMessageToAll(QVariantMap msgMap);
     void refreshTextView();
