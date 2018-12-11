@@ -12,7 +12,7 @@ ChatDialog::ChatDialog(){
 
     // Append a "dummy" entry into index 0 of log, so that prevLogIndex checks work
     QVariantMap dummy;
-    log.append(dummy);
+    log.append(dummy); //myLastLogIndex=0
 
 	qDebug() << "myPort: " << QString::number(myPort);
 	qDebug() << "-------------------";
@@ -222,7 +222,7 @@ void ChatDialog::sendAppendEntriesMsg(quint16 destPort, bool heartbeat){
     // prevLogTerm = term of the entry at prevLogIndex
     quint16 myPrevLogTerm = log.value(prevLogIndex).toMap().value("term").toInt();
     outMap.insert(QString("prevLogTerm"), QVariant(myPrevLogTerm));
-    // qDebug() << "The prevLogTerm to the entries is: " + QString::number(myPrevLogTerm);    // Come back and check this once we are updating nextIndex
+    //qDebug() << "The prevLogTerm to the entries is: " + QString::number(myPrevLogTerm);    // Come back and check this once we are updating nextIndex
 
     // Copies a list of values starting at 1st arg, if 2nd arg = -1, copy to end
     // Note, if nextIndexForPort is larger than actual indexes in log, mid fx will return a blank list
@@ -295,6 +295,8 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
     // If leaderPrevLogIndex is the last index we have, then append all entries to end
     if(log.length() == leaderPrevLogIndex + 1){
         log.append(entries);
+        myLastLogIndex = log.length() - 1;
+        myLastLogTerm = log.value(myLastLogIndex).toMap().value("term").toInt();
     }
     else{
         // For every entry in entries
@@ -314,6 +316,8 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
         }
         if(entries.length() > 0){
             log.append(entries);
+            myLastLogIndex = log.length() - 1;
+            myLastLogTerm = log.value(myLastLogIndex).toMap().value("term").toInt();
         }
     }
 
@@ -360,7 +364,7 @@ void ChatDialog::replyToAppendEntries(bool success, quint16 prevIndex, quint16 e
 /* Called by leader to process a follower's reply to their AppendEntries message */
 void ChatDialog::processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourcePort){
 
-    qDebug() << "processAppendEntriesMsgReply";
+    //qDebug() << "processAppendEntriesMsgReply";
 
     // Load parameters from message
     quint16 replyTerm = inMap.value("term").toInt();
@@ -428,36 +432,17 @@ void ChatDialog::processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourceP
     }
 
     while(myLastApplied < myCommitIndex){
-
         QString message = log.value(myLastApplied+1).toMap().value("message").toString();
         stateMachine.append(message);
         refreshTextView();
         myLastApplied++;
     }
-
-
-
-
-    // if rejected because of term inconsistency, step down!
-
-
-    // make sure leader does not update nextIndex past what is possible with log
-
-    // if majority, remove this from
-    // apply to state machine, update my commit index
-
-    // remove from committed, client request? reply to client?
-
-
-
-
 }
 
 
-
-
-
 void ChatDialog::processPendingDatagrams(){
+
+    // check if we're participating in raft
 
     while(mySocket->hasPendingDatagrams()){
         QByteArray datagram;
@@ -466,6 +451,10 @@ void ChatDialog::processPendingDatagrams(){
         quint16 sourcePort;
 
         if(mySocket->readDatagram(datagram.data(), datagram.size(), &source, &sourcePort) != -1){
+
+
+            // check if I've dropped this source port
+
 
             QDataStream inStream(&datagram, QIODevice::ReadOnly);
             QVariantMap inMap;
@@ -502,12 +491,13 @@ void ChatDialog::gotReturnPressed(){
     // NEED TO PARSE FOR SUPPORT COMMANDS
 
 
+
     // Store "Client" request
+    QVariantMap clientRequest;
+
     QString messageID = QString(myPort) + QString(mySeqNo);
     mySeqNo++;
     QString message = QString::number(myPort) + ": " + textline->text();
-
-    QVariantMap clientRequest;
     clientRequest.insert("messageID", messageID);
     clientRequest.insert("term", myCurrentTerm); //Is this included?
     clientRequest.insert("message", message);
@@ -516,7 +506,8 @@ void ChatDialog::gotReturnPressed(){
 
     textline->clear();
 
-    // ???????
+
+
 
     if(myRole == LEADER){
 
@@ -541,9 +532,12 @@ void ChatDialog::gotReturnPressed(){
 void ChatDialog::attemptToCommitMsg(){
 
 
-    log.append(queuedClientRequests.first());
+    QVariantMap nextLogEntry = queuedClientRequests.first().toMap();
+    queuedClientRequests.pop_front();
+
+    log.append(nextLogEntry);
     myLastLogIndex++;
-    myLastLogTerm = queuedClientRequests.first().toMap().value("term").toInt();
+    myLastLogTerm = nextLogEntry.value("term").toInt();
 
     qDebug() << "myLastLogIndex is now " + QString::number(myLastLogIndex);
     qDebug() << "myLastLogTerm is now " + QString::number(myLastLogTerm);
@@ -606,6 +600,8 @@ void ChatDialog::refreshTextView(){
 }
 
 void ChatDialog::serializeMessage(QVariantMap &outMap, quint16 destPort){
+
+    // check if we're participating in raft
 
     QByteArray outData;
     QDataStream outStream(&outData, QIODevice::WriteOnly);
