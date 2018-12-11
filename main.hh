@@ -15,11 +15,12 @@
 #include <QElapsedTimer>
 #include <unistd.h>
 #include <stdlib.h>
-#include <limits>
+
+
 
 // We start Seq No at 1 because an empty entry in QVariantMap returns 0
 #define SEQNOSTART 1
-#define QINT64MAX std::numeric_limits<qint64>::max() //still need this?
+
 
 #define LEADER 1
 #define CANDIDATE 2
@@ -66,26 +67,23 @@ private:
     QList<quint16> nodesThatVotedForMe;
 
     qint16 myLeader = -1;
-
-    quint16 myCurrentTerm = 0;
     qint16 votedFor = -1;
 
+    quint16 myCurrentTerm = 0;
 
-    // should these be calculated every time? IDK
-    qint16 myLastLogIndex = 0; //I'm thinking start these at negative 1
-    qint16 myLastLogTerm = 0;
-
-
-
-    qint16 myCommitIndex = 0; // SAFE TO START AT 0? // When am I updating this???
-    qint16 myLastApplied = 0;
+    quint16 myCommitIndex = 0; // Everyone has the same dummy entry
+    quint16 myLastApplied = 0;
 
 
-    // Log entry should be QVariantMap that stores messageID, term, and message
+    // Log entry should be QVariantMap that stores messageID, term, and message !!!!
     // messageID = concat(myPort, mySeqNo)
+    // Note: at startup, append a "dummy" entry into index 0 of log, so that prevLogIndex checks work
     QVariantList log;
     QVariantList queuedClientRequests;
 
+    // should these be calculated every time? IDK, not sure about thread safety
+    quint16 myLastLogIndex = 0;
+    quint16 myLastLogTerm = 0;
 
 
     // After commands are committed, they are executed i.e. messages are appended
@@ -93,7 +91,7 @@ private:
     QList<QString> stateMachine;
 
     // <Server, next log entry to send to that server>
-    // Used by leader. initializes at, decremented when gets a false
+    // Used by leader. initializes at leader myLastLogIndex+1, decremented when gets a false
     QMap<quint16, quint16> nextIndex;
 
     // <Server, highest log entry known to be replicated on server>
@@ -108,7 +106,7 @@ private:
     void processReplyRequestVote(QVariantMap inMap, quint16 sourcePort);
 
 
-    void sendAppendEntriesMsg(quint16 destPort);
+    void sendAppendEntriesMsg(quint16 destPort, bool heartbeat);
 
     void processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort);
     void replyToAppendEntries(bool success, quint16 destPort);
