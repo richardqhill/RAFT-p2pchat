@@ -469,15 +469,22 @@ void ChatDialog::processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourceP
 /* Called by server to process client requests */
 void ChatDialog::gotReturnPressed(){
 
-
+    QString input = textline->text();
     // NEED TO PARSE FOR SUPPORT COMMANDS
+
+    // is first character < and is last character >
+    if(input.length() > 0 && input.startsWith("<") && input.endsWith(">")){
+        processSupportCommand(input.mid(1, input.length()-2));
+        textline->clear();
+        return;
+    }
 
 
 
     // Store "Client" request
     QVariantMap clientRequest;
     QString messageID = QString(myPort) + QString(mySeqNo);
-    QString message = QString::number(myPort) + ": " + textline->text();
+    QString message = QString::number(myPort) + ": " + input;
     mySeqNo++;
 
     clientRequest.insert("type", "clientRequest");
@@ -495,6 +502,13 @@ void ChatDialog::gotReturnPressed(){
     else{    // I AM A CLIENT
         attemptToForwardNextClientRequest(); // what timer do I use to retry this?
     }
+}
+
+void ChatDialog::processSupportCommand(QString command){
+
+    qDebug() << "Hey, it's a support command: " << command;
+
+
 }
 
 /* Called by follower to forward client requests to leader */
@@ -633,7 +647,13 @@ void ChatDialog::refreshTextView(){
     textview->clear();
     for(int i=0; i< stateMachine.length(); i++){
 
-        textview->append(stateMachine.at(i));
+        if(stateMachine.at(i).contains(QString::number(myPort))){
+            textview->setTextColor(QColor("blue"));
+            textview->append(stateMachine.at(i));
+            textview->setTextColor(QColor("black"));
+        }
+        else
+            textview->append(stateMachine.at(i));
     }
 }
 

@@ -59,18 +59,16 @@ private:
     QTimer *electionTimer;
     QTimer *sendHeartbeatTimer;
     QTimer *forwardClientRequestTimer;
-    // timer for forwards?
 
     qint32 myCandidateID;
     quint16 myRole = FOLLOWER;
-    // Used by candidate in election
-    QList<quint16> nodesThatVotedForMe;
+    QList<quint16> nodesThatVotedForMe; // Used by candidate in election
 
     qint32 myLeader = -1;
     qint32 votedFor = -1;
 
     quint16 myCurrentTerm = 0;
-    quint16 myCommitIndex = 0; // Everyone has the same dummy entry
+    quint16 myCommitIndex = 0; // Everyone has a dummy entry at log index 0
     quint16 myLastApplied = 0;
 
     // Log entry should be QVariantMap that stores messageID, term, and message
@@ -88,12 +86,12 @@ private:
     QList<QString> stateMachine;
     QList<QString> stateMachineMessageIDs;
 
+    // Used by leader. initializes at leader myLastLogIndex+1
     // <Server, next log entry to send to that server>
-    // Used by leader. initializes at leader myLastLogIndex+1, decremented when gets a false
     QMap<quint16, quint16> nextIndex;
 
-    // <Server, highest log entry known to be replicated on server>
     // Used by leader. used to keep track of commit status
+    // <Server, highest log entry known to be replicated on server>
     QMap<quint16, quint16> matchIndex;
 
 
@@ -105,7 +103,7 @@ private:
     void processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort);
     void replyToAppendEntries(bool success, quint16 prevIndex, quint16 entryLen, quint16 destPort);
     void processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourcePort);
-
+    void processSupportCommand(QString command);
 
     void processClientRequestFromFollower(QVariantMap inMap);
     void attemptToCommitNextClientRequest();
