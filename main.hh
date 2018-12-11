@@ -45,6 +45,7 @@ public slots:
 	void gotReturnPressed();
     void processPendingDatagrams();
     void sendRequestForVotes();
+    void attemptToForwardNextClientRequest();
     void sendHeartbeat();
 
 private:
@@ -57,6 +58,7 @@ private:
     quint16 timeToWaitForHeartbeat;
     QTimer *electionTimer;
     QTimer *sendHeartbeatTimer;
+    QTimer *forwardClientRequestTimer;
     // timer for forwards?
 
     qint32 myCandidateID;
@@ -104,7 +106,7 @@ private:
     void replyToAppendEntries(bool success, quint16 prevIndex, quint16 entryLen, quint16 destPort);
     void processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourcePort);
 
-    void attemptToForwardNextClientRequest();
+
     void processClientRequestFromFollower(QVariantMap inMap);
     void attemptToCommitNextClientRequest();
     void removeMessageIDFromQueuedClientRequests(QString messageID);

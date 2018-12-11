@@ -11,8 +11,8 @@ ChatDialog::ChatDialog(){
     myCandidateID = myPort;
 
     // Append a "dummy" entry into index 0 of log, so that prevLogIndex checks work
-    QVariantMap dummy;
-    log.append(dummy); //myLastLogIndex=0
+    QVariantMap dummyEntry;
+    log.append(dummyEntry); //myLastLogIndex=0
 
 	qDebug() << "myPort: " << QString::number(myPort);
 	qDebug() << "-------------------";
@@ -38,11 +38,10 @@ ChatDialog::ChatDialog(){
     // Timeout waiting for leader heartbeat. If no heartbeat within waitForHeartbeat msec, attempt to become leader
     qsrand(QTime::currentTime().msec());
 
-    //timeToWaitForHeartbeat = qrand() % 150 + 150;
-    timeToWaitForHeartbeat = qrand() % 150 + 500;  // A little slower for sanity
-
+    // Timer if server has not received a heartbeat, they start an election
     electionTimer = new QTimer(this);
     connect(electionTimer, SIGNAL(timeout()), this, SLOT(sendRequestForVotes()));
+    timeToWaitForHeartbeat = qrand() % 150 + 150;
     electionTimer->start(timeToWaitForHeartbeat);
 
     // Timer for leader to keep track of when to send heartbeats.
@@ -50,6 +49,10 @@ ChatDialog::ChatDialog(){
     sendHeartbeatTimer = new QTimer(this);
     connect(sendHeartbeatTimer, SIGNAL(timeout()), this, SLOT(sendHeartbeat()));
 
+    // Timer if server has not received a heartbeat, they start an election
+    forwardClientRequestTimer = new QTimer(this);
+    connect(forwardClientRequestTimer, SIGNAL(timeout()), this, SLOT(attemptToForwardNextClientRequest()));
+    forwardClientRequestTimer->start(50);
 }
 
 /* Called by follower whose waitForHeartbeatTimer timed out. Starts a new election */
