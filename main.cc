@@ -202,6 +202,22 @@ void ChatDialog::processReplyRequestVote(QVariantMap inMap, quint16 sourcePort){
     }
 }
 
+/* Called by leader sends a heartbeat to all followers every 50 msec*/
+void ChatDialog::sendHeartbeat(){
+
+    for(int i = mySocket->myPortMin; i<= mySocket->myPortMax; i++){
+        if(i!= myPort)
+            sendAppendEntriesMsg(i, true); //2nd arg: true if heartbeat
+    }
+
+    // Prevent leader from trying to depose themselves
+    electionTimer->start(timeToWaitForHeartbeat);
+
+    if(myCommitIndex == myLastLogIndex){
+        attemptToCommitNextClientRequest();
+    }
+}
+
 /* Called by leader to replicate its log onto its followers */
 void ChatDialog::sendAppendEntriesMsg(quint16 destPort, bool heartbeat){
 
@@ -447,6 +463,7 @@ void ChatDialog::processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourceP
     }
 }
 
+/* Called by server to process client requests */
 void ChatDialog::gotReturnPressed(){
 
 
@@ -469,16 +486,15 @@ void ChatDialog::gotReturnPressed(){
 
     textline->clear();
 
-
     if(myRole == LEADER){
         attemptToCommitNextClientRequest();
     }
-
     else{    // I AM A CLIENT
         attemptToForwardNextClientRequest(); // what timer do I use to retry this?
     }
 }
 
+/* Called by follower to forward client requests to leader */
 void ChatDialog::attemptToForwardNextClientRequest(){
 
     if(!queuedClientRequests.isEmpty()) {
@@ -490,7 +506,8 @@ void ChatDialog::attemptToForwardNextClientRequest(){
     }
 }
 
-void ChatDialog::processClientRequestFromFollower(QVariantMap inMap, quint16 sourcePort){
+/* Called by leader to process client request from follower */
+void ChatDialog::processClientRequestFromFollower(QVariantMap inMap){
 
     // Do not add client request if messageID already in state machine or already in queuedClientRequests
     QString messageID = inMap.value("messageID").toString();
@@ -507,6 +524,7 @@ void ChatDialog::processClientRequestFromFollower(QVariantMap inMap, quint16 sou
     queuedClientRequests.append(inMap);
 }
 
+/* Called by leader to attempt to commit the next client request */
 void ChatDialog::attemptToCommitNextClientRequest(){
 
     if(!queuedClientRequests.isEmpty()){
@@ -529,6 +547,7 @@ void ChatDialog::attemptToCommitNextClientRequest(){
     }
 }
 
+/* Helper fx: called by any server to remove a recently executed client request from queue */
 void ChatDialog::removeMessageIDFromQueuedClientRequests(QString messageID){
 
     for(int i=0; i<queuedClientRequests.length(); i++){
@@ -580,7 +599,7 @@ void ChatDialog::processPendingDatagrams(){
 
                 else if(inMap.value("type") == "clientRequest"){
                     qDebug() << "Received a clientRequest from a follower!";
-                    processClientRequestFromFollower(inMap, sourcePort);
+                    processClientRequestFromFollower(inMap);
                 }
             }
         }
@@ -603,23 +622,6 @@ void ChatDialog::sendMessageToAll(QVariantMap msgMap){
     for(int i = mySocket->myPortMin; i<= mySocket->myPortMax; i++){
         if(i!= myPort)
             serializeMessage(msgMap, i);
-    }
-}
-
-/* Leader sends a heartbeat to all followers every 50 msec*/
-void ChatDialog::sendHeartbeat(){
-
-    for(int i = mySocket->myPortMin; i<= mySocket->myPortMax; i++){
-        if(i!= myPort)
-            sendAppendEntriesMsg(i, true); //2nd arg: true if heartbeat
-    }
-
-    // Prevent leader from trying to depose themselves
-    electionTimer->start(timeToWaitForHeartbeat);
-
-
-    if(myCommitIndex == myLastLogIndex){
-        attemptToCommitNextClientRequest();
     }
 }
 

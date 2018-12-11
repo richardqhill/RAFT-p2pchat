@@ -17,10 +17,8 @@
 #include <stdlib.h>
 
 
-
 // We start Seq No at 1 because an empty entry in QVariantMap returns 0
 #define SEQNOSTART 1
-
 
 #define LEADER 1
 #define CANDIDATE 2
@@ -51,11 +49,12 @@ public slots:
     void sendRequestForVotes();
     void sendHeartbeat();
 
-
-
 private:
 	QTextEdit *textview;
 	QLineEdit *textline;
+
+    quint16 myPort;
+    quint32 mySeqNo = 1;
 
     quint16 timeToWaitForHeartbeat;
     QTimer *electionTimer;
@@ -71,10 +70,8 @@ private:
     qint32 votedFor = -1;
 
     quint16 myCurrentTerm = 0;
-
     quint16 myCommitIndex = 0; // Everyone has the same dummy entry
     quint16 myLastApplied = 0;
-
 
     // Log entry should be QVariantMap that stores messageID, term, and message !!!!
     // messageID = concat(myPort, mySeqNo)
@@ -85,7 +82,6 @@ private:
     // should these be calculated every time? IDK, not sure about thread safety
     quint16 myLastLogIndex = 0;
     quint16 myLastLogTerm = 0;
-
 
     // After commands are committed, they are executed i.e. messages are appended
     // to the state machine
@@ -102,34 +98,24 @@ private:
 
 
 
-    void sendMessageToAll(QVariantMap msgMap);
+
     void processRequestVote(QVariantMap msg, quint16 sourcePort);
     void replyToRequestForVote(bool voteGranted, quint16 sourcePort);
     void processReplyRequestVote(QVariantMap inMap, quint16 sourcePort);
 
-
     void sendAppendEntriesMsg(quint16 destPort, bool heartbeat);
-
     void processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort);
     void replyToAppendEntries(bool success, quint16 prevIndex, quint16 entryLen, quint16 destPort);
     void processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourcePort);
 
-    void removeMessageIDFromQueuedClientRequests(QString messageID);
-
-    void processClientRequestFromFollower(QVariantMap inMap, quint16 sourcePort);
-    void processClientRequestAckFromLeader(QVariantMap inMap, quint16 sourcePort);
-
-
-    void attemptToCommitNextClientRequest();
     void attemptToForwardNextClientRequest();
-    void refreshTextView();
-
-
-	// OLD CODE
-    quint16 myPort;
-    quint32 mySeqNo = 1;
+    void processClientRequestFromFollower(QVariantMap inMap);
+    void attemptToCommitNextClientRequest();
+    void removeMessageIDFromQueuedClientRequests(QString messageID);
+    
     void serializeMessage(QVariantMap &myMap, quint16 destPort);
-    void deserializeMessage(QByteArray datagram);
+    void sendMessageToAll(QVariantMap msgMap);
+    void refreshTextView();
 
 
 };
