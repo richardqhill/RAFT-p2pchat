@@ -60,14 +60,15 @@ private:
     quint16 timeToWaitForHeartbeat;
     QTimer *electionTimer;
     QTimer *sendHeartbeatTimer;
+    // timer for forwards?
 
-    quint16 myCandidateId;
+    qint32 myCandidateID;
     quint16 myRole = FOLLOWER;
     // Used by candidate in election
     QList<quint16> nodesThatVotedForMe;
 
-    qint16 myLeader = -1;
-    qint16 votedFor = -1;
+    qint32 myLeader = -1;
+    qint32 votedFor = -1;
 
     quint16 myCurrentTerm = 0;
 
@@ -89,6 +90,7 @@ private:
     // After commands are committed, they are executed i.e. messages are appended
     // to the state machine
     QList<QString> stateMachine;
+    QList<QString> stateMachineMessageIDs;
 
     // <Server, next log entry to send to that server>
     // Used by leader. initializes at leader myLastLogIndex+1, decremented when gets a false
@@ -112,8 +114,14 @@ private:
     void replyToAppendEntries(bool success, quint16 prevIndex, quint16 entryLen, quint16 destPort);
     void processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourcePort);
 
+    void removeMessageIDFromQueuedClientRequests(QString messageID);
 
-    void attemptToCommitMsg();
+    void processClientRequestFromFollower(QVariantMap inMap, quint16 sourcePort);
+    void processClientRequestAckFromLeader(QVariantMap inMap, quint16 sourcePort);
+
+
+    void attemptToCommitNextClientRequest();
+    void attemptToForwardNextClientRequest();
     void refreshTextView();
 
 

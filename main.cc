@@ -8,7 +8,7 @@ ChatDialog::ChatDialog(){
 	}
 
     myPort = mySocket->port;
-	myCandidateId = myPort;
+    myCandidateID = myPort;
 
     // Append a "dummy" entry into index 0 of log, so that prevLogIndex checks work
     QVariantMap dummy;
@@ -60,14 +60,14 @@ void ChatDialog::sendRequestForVotes(){
     myCurrentTerm++;
     nodesThatVotedForMe.clear();
     nodesThatVotedForMe.append(myPort);
-    votedFor = myCandidateId;
+    votedFor = myCandidateID;
     myRole = CANDIDATE;
 
     // Create requestVote message
     QVariantMap outMap;
     outMap.insert(QString("type"), QVariant(QString("requestVote")));
     outMap.insert(QString("term"), QVariant(myCurrentTerm));
-    outMap.insert(QString("candidateId"), QVariant(myCandidateId));
+    outMap.insert(QString("candidateID"), QVariant(myCandidateID));
     outMap.insert(QString("lastLogIndex"), QVariant(myLastLogIndex));
     outMap.insert(QString("lastLogTerm"), QVariant(myLastLogTerm));
 
@@ -81,7 +81,7 @@ void ChatDialog::processRequestVote(QVariantMap inMap, quint16 sourcePort){
 
     // Load parameters from message
     quint16 candidateTerm = inMap.value("term").toInt();
-    quint16 candidateID = inMap.value("candidateId").toInt();
+    qint32  candidateID = inMap.value("candidateID").toInt();
     quint16 candidateLastLogIndex = inMap.value("lastLogIndex").toInt();
     quint16 candidateLastLogTerm = inMap.value("lastLogTerm").toInt();
 
@@ -178,7 +178,7 @@ void ChatDialog::processReplyRequestVote(QVariantMap inMap, quint16 sourcePort){
             qDebug() << "I became leader!";
 
             myRole = LEADER;
-            myLeader = myCandidateId;
+            myLeader = myCandidateID;
 
             // Initialize next index: tracks for each server the next log entry I should send them
             nextIndex.clear();
@@ -211,7 +211,7 @@ void ChatDialog::sendAppendEntriesMsg(quint16 destPort, bool heartbeat){
     QVariantMap outMap;
     outMap.insert(QString("type"), QVariant(QString("appendEntries")));
     outMap.insert(QString("term"), QVariant(myCurrentTerm));
-    outMap.insert(QString("leaderId"), QVariant(myCandidateId));
+    outMap.insert(QString("leaderID"), QVariant(myCandidateID));
     outMap.insert(QString("leaderCommit"), QVariant(myCommitIndex));
 
     // nextIndex default at 1 for empty log
@@ -239,7 +239,7 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
 
     // Load parameters from message
     quint16 leaderTerm = inMap.value("term").toInt();
-    qint16  leaderID = inMap.value("leaderID").toInt();
+    qint32  leaderID = inMap.value("leaderID").toInt();
     quint16 leaderCommitIndex = inMap.value("leaderCommit").toInt();
     quint16 leaderPrevLogIndex = inMap.value("prevLogIndex").toInt();
     quint16 leaderPrevLogTerm = inMap.value("prevLogTerm").toInt();
@@ -257,8 +257,10 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
     }
 
     // Only reset election timer if we receive RPC from CURRENT leader
-    if(leaderTerm == myCurrentTerm)
+    if(leaderTerm == myCurrentTerm) {
+        myLeader = leaderID;
         electionTimer->start(timeToWaitForHeartbeat);
+    }
 
     if(leaderTerm < myCurrentTerm){
         qDebug() << "Replied false to Append Entries because my current term > leader term";
@@ -267,7 +269,7 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
     }
 
     if(inMap.contains("entries")){
-        qDebug() << entries;
+        //qDebug() << entries;
         qDebug() << entries.value(0).toMap().value("message").toString();
     }
 
@@ -334,9 +336,13 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
     while(myLastApplied < myCommitIndex){
 
         QString message = log.value(myLastApplied+1).toMap().value("message").toString();
+        QString messageID = log.value(myLastApplied+1).toMap().value("messageID").toString();
         stateMachine.append(message);
+        stateMachineMessageIDs.append(messageID);
         refreshTextView();
         myLastApplied++;
+
+        removeMessageIDFromQueuedClientRequests(messageID);
     }
 
     replyToAppendEntries(true, leaderPrevLogIndex, entries.length(), sourcePort);
@@ -404,9 +410,6 @@ void ChatDialog::processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourceP
     matchIndexes.append(myLastLogIndex);
     qSort(matchIndexes);
 
-    qDebug() << matchIndex;
-    qDebug() << matchIndexes;
-
     // By definition of list being sorted, first entry must be valid "majority"
     quint16 majorityMax = matchIndexes.value(0);
 
@@ -423,7 +426,8 @@ void ChatDialog::processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourceP
             majorityMax= value;
     }
 
-    qDebug() << "My N is: " + QString::number(majorityMax);
+    if(entryLen >0)
+        qDebug() << matchIndexes << " My N is: " + QString::number(majorityMax);
 
     if(majorityMax > myCommitIndex){
         if(log.value(majorityMax).toMap().value("term").toInt() == myCurrentTerm){
@@ -433,12 +437,105 @@ void ChatDialog::processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourceP
 
     while(myLastApplied < myCommitIndex){
         QString message = log.value(myLastApplied+1).toMap().value("message").toString();
+        QString messageID = log.value(myLastApplied+1).toMap().value("messageID").toString();
         stateMachine.append(message);
+        stateMachineMessageIDs.append(messageID);
         refreshTextView();
         myLastApplied++;
+
+        removeMessageIDFromQueuedClientRequests(messageID);
     }
 }
 
+void ChatDialog::gotReturnPressed(){
+
+
+    // NEED TO PARSE FOR SUPPORT COMMANDS
+
+
+
+    // Store "Client" request
+    QVariantMap clientRequest;
+    QString messageID = QString(myPort) + QString(mySeqNo);
+    QString message = QString::number(myPort) + ": " + textline->text();
+    mySeqNo++;
+
+    clientRequest.insert("type", "clientRequest");
+    clientRequest.insert("messageID", messageID);
+    clientRequest.insert("term", myCurrentTerm); //Is this included?
+    clientRequest.insert("message", message);
+
+    queuedClientRequests.append(clientRequest);
+
+    textline->clear();
+
+
+    if(myRole == LEADER){
+        attemptToCommitNextClientRequest();
+    }
+
+    else{    // I AM A CLIENT
+        attemptToForwardNextClientRequest(); // what timer do I use to retry this?
+    }
+}
+
+void ChatDialog::attemptToForwardNextClientRequest(){
+
+    if(!queuedClientRequests.isEmpty()) {
+
+        qDebug() << "Forwarding client request to leader";
+
+        QVariantMap firstClientRequest = queuedClientRequests.first().toMap();
+        serializeMessage(firstClientRequest, myLeader);
+    }
+}
+
+void ChatDialog::processClientRequestFromFollower(QVariantMap inMap, quint16 sourcePort){
+
+    // Do not add client request if messageID already in state machine or already in queuedClientRequests
+    QString messageID = inMap.value("messageID").toString();
+
+    if(stateMachineMessageIDs.contains(messageID))
+        return;
+
+    for(int i=0; i<queuedClientRequests.length(); i++){
+        if(queuedClientRequests.value(i).toMap().value("messageID").toString() == messageID)
+            return;
+    }
+
+    qDebug()<< "I added the forwarded client request to my queuedClientRequests";
+    queuedClientRequests.append(inMap);
+}
+
+void ChatDialog::attemptToCommitNextClientRequest(){
+
+    if(!queuedClientRequests.isEmpty()){
+
+        QVariantMap nextLogEntry = queuedClientRequests.first().toMap();
+        log.append(nextLogEntry);
+        myLastLogIndex++;
+        myLastLogTerm = nextLogEntry.value("term").toInt();
+
+        qDebug() << "myLastLogIndex is now " + QString::number(myLastLogIndex);
+        qDebug() << "myLastLogTerm is now " + QString::number(myLastLogTerm);
+
+        // Send messages AppendEntries RPC everyone
+        for(int i = mySocket->myPortMin; i<= mySocket->myPortMax; i++){
+            if(i!= myPort)
+                sendAppendEntriesMsg(i, false);
+        }
+
+        refreshTextView();
+    }
+}
+
+void ChatDialog::removeMessageIDFromQueuedClientRequests(QString messageID){
+
+    for(int i=0; i<queuedClientRequests.length(); i++){
+        if(queuedClientRequests.value(i).toMap().value("messageID").toString() == messageID)
+            queuedClientRequests.removeAt(i);
+    }
+}
 
 void ChatDialog::processPendingDatagrams(){
 
@@ -480,122 +577,13 @@ void ChatDialog::processPendingDatagrams(){
                     //qDebug() << "Received a reply to my Append Entries message!";
                     processAppendEntriesMsgReply(inMap, sourcePort);
                 }
+
+                else if(inMap.value("type") == "clientRequest"){
+                    qDebug() << "Received a clientRequest from a follower!";
+                    processClientRequestFromFollower(inMap, sourcePort);
+                }
             }
         }
-    }
-}
-
-void ChatDialog::gotReturnPressed(){
-
-
-    // NEED TO PARSE FOR SUPPORT COMMANDS
-
-
-
-    // Store "Client" request
-    QVariantMap clientRequest;
-
-    QString messageID = QString(myPort) + QString(mySeqNo);
-    mySeqNo++;
-    QString message = QString::number(myPort) + ": " + textline->text();
-    clientRequest.insert("messageID", messageID);
-    clientRequest.insert("term", myCurrentTerm); //Is this included?
-    clientRequest.insert("message", message);
-
-    queuedClientRequests.append(clientRequest);
-
-    textline->clear();
-
-
-
-
-    if(myRole == LEADER){
-
-        attemptToCommitMsg();
-    }
-
-    else{    // I AM A CLIENT
-
-
-        // SEND TO "SERVER" but wait for Leader to respond with success until I move on
-
-
-        //attempt to forward messages from uncommitted to leader
-        qDebug() << "hi";
-
-
-
-
-    }
-}
-
-void ChatDialog::attemptToCommitMsg(){
-
-
-    QVariantMap nextLogEntry = queuedClientRequests.first().toMap();
-    queuedClientRequests.pop_front();
-
-    log.append(nextLogEntry);
-    myLastLogIndex++;
-    myLastLogTerm = nextLogEntry.value("term").toInt();
-
-    qDebug() << "myLastLogIndex is now " + QString::number(myLastLogIndex);
-    qDebug() << "myLastLogTerm is now " + QString::number(myLastLogTerm);
-
-    // Send messages AppendEntries RPC everyone
-    for(int i = mySocket->myPortMin; i<= mySocket->myPortMax; i++){
-        if(i!= myPort)
-            sendAppendEntriesMsg(i, false);
-    }
-
-    //stateMachine.append(queuedClientRequests.first().first);
-    refreshTextView();
-
-
-//    while(!uncommittedMsgs.isEmpty()){
-//
-//        nodesThatVotedForCommit.clear();
-//
-//        uncommittedMsgs.first();
-//
-//        sendAppendEntriesMsg();
-//
-//        processPendingDatagrams();
-//
-//    }
-
-
-}
-
-
-
-
-
-
-/* Leader sends a heartbeat to all followers every 50 msec*/
-void ChatDialog::sendHeartbeat(){
-
-    for(int i = mySocket->myPortMin; i<= mySocket->myPortMax; i++){
-        if(i!= myPort)
-            sendAppendEntriesMsg(i, true); //2nd arg: true if heartbeat
-    }
-
-    // Prevent leader from trying to depose themselves
-    electionTimer->start(timeToWaitForHeartbeat);
-}
-
-
-
-/* ---------------------------------------------------------------------------------------------------------*/
-// Probably good ///
-
-
-void ChatDialog::refreshTextView(){
-
-    textview->clear();
-    for(int i=0; i< stateMachine.length(); i++){
-
-        textview->append(stateMachine.at(i));
     }
 }
 
@@ -615,6 +603,32 @@ void ChatDialog::sendMessageToAll(QVariantMap msgMap){
     for(int i = mySocket->myPortMin; i<= mySocket->myPortMax; i++){
         if(i!= myPort)
             serializeMessage(msgMap, i);
+    }
+}
+
+/* Leader sends a heartbeat to all followers every 50 msec*/
+void ChatDialog::sendHeartbeat(){
+
+    for(int i = mySocket->myPortMin; i<= mySocket->myPortMax; i++){
+        if(i!= myPort)
+            sendAppendEntriesMsg(i, true); //2nd arg: true if heartbeat
+    }
+
+    // Prevent leader from trying to depose themselves
+    electionTimer->start(timeToWaitForHeartbeat);
+
+
+    if(myCommitIndex == myLastLogIndex){
+        attemptToCommitNextClientRequest();
+    }
+}
+
+void ChatDialog::refreshTextView(){
+
+    textview->clear();
+    for(int i=0; i< stateMachine.length(); i++){
+
+        textview->append(stateMachine.at(i));
     }
 }
 
