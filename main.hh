@@ -24,7 +24,7 @@
 // Change this to 50 msec for must faster distribution of messages
 // Set to 1.5 seconds for this assignment since we must print all raft
 // communications and want to keep things legible.
-#define HEARTBEATTIME 1500 //msec
+#define HEARTBEATTIME 50 //msec
 
 class NetSocket : public QUdpSocket
 {
@@ -97,6 +97,10 @@ private:
     // <Server, highest log entry known to be replicated on server>
     QMap<quint16, quint16> matchIndex;
 
+    //Support commands
+    bool participatingInRAFT = true;
+    QList<quint16> nodesIHaveDropped;
+
 
     void processRequestVote(QVariantMap msg, quint16 sourcePort);
     void replyToRequestForVote(bool voteGranted, quint16 sourcePort);
@@ -106,6 +110,7 @@ private:
     void processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort);
     void replyToAppendEntries(bool success, quint16 prevIndex, quint16 entryLen, quint16 destPort);
     void processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourcePort);
+    void processClientRequest(QString input);
     void processSupportCommand(QString command);
 
     void processClientRequestFromFollower(QVariantMap inMap, quint16 sourcePort);

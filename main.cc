@@ -15,7 +15,7 @@ ChatDialog::ChatDialog(){
     log.append(dummyEntry); //myLastLogIndex=0
 
 	qDebug() << "myPort: " << QString::number(myPort);
-	qDebug() << "-------------------";
+    qDebug() << "------------------------------------------";
 
     setWindowTitle("RAFT Chat: " + QString::number(myPort));
 
@@ -38,7 +38,8 @@ ChatDialog::ChatDialog(){
     connect(electionTimer, SIGNAL(timeout()), this, SLOT(sendRequestForVotes()));
     qsrand(QTime::currentTime().msec());
     // Time to wait for heartbeat should be much larger than heartbeat time (currently 1500 msec)
-    timeToWaitForHeartbeat = qrand() % 150 + 2500;
+    timeToWaitForHeartbeat = qrand() % 150 + 150;
+    qDebug() << "My election timeout is " + QString::number(timeToWaitForHeartbeat);
     electionTimer->start(timeToWaitForHeartbeat);
 
     // Timer for leader to keep track of when to send heartbeats.
@@ -56,6 +57,7 @@ ChatDialog::ChatDialog(){
 void ChatDialog::sendRequestForVotes(){
 
     qDebug() << "Sending RequestVote message: attempting to become leader";
+    electionTimer->start(timeToWaitForHeartbeat);
 
     myCurrentTerm++;
     nodesThatVotedForMe.clear();
@@ -83,12 +85,12 @@ void ChatDialog::processRequestVote(QVariantMap inMap, quint16 sourcePort){
     quint16 candidateLastLogIndex = inMap.value("lastLogIndex").toInt();
     quint16 candidateLastLogTerm = inMap.value("lastLogTerm").toInt();
 
-
     // Rules for All Servers 5.1: If RPC request or response contains term T > currentTerm,
     // set currentTerm = T and convert to follower
     if(candidateTerm > myCurrentTerm){
         myCurrentTerm = candidateTerm;
         myRole = FOLLOWER;
+        votedFor = -1;
         sendHeartbeatTimer->stop();
     }
 
@@ -156,9 +158,10 @@ void ChatDialog::processReplyRequestVote(QVariantMap inMap, quint16 sourcePort){
     // Rules for All Servers 5.1: If RPC request or response contains term T > currentTerm,
     // set currentTerm = T and convert to follower
     if(termFromReply > myCurrentTerm){
-        myRole = FOLLOWER;
-        sendHeartbeatTimer->stop();
         myCurrentTerm = termFromReply;
+        myRole = FOLLOWER;
+        votedFor = -1;
+        sendHeartbeatTimer->stop();
         return;
     }
 
@@ -171,7 +174,7 @@ void ChatDialog::processReplyRequestVote(QVariantMap inMap, quint16 sourcePort){
             nodesThatVotedForMe.append(sourcePort);
 
         // Check if I have a majority of votes
-        if(nodesThatVotedForMe.length() >= 2){        //should be 3, changing to 2 for debugging         !!!!!!!!!
+        if(nodesThatVotedForMe.length() >= 3){
 
             qDebug() << "I became leader!";
 
@@ -203,7 +206,9 @@ void ChatDialog::processReplyRequestVote(QVariantMap inMap, quint16 sourcePort){
 /* Called by leader sends a heartbeat to all followers every 50 msec*/
 void ChatDialog::sendHeartbeat(){
 
-    qDebug() << "Sending heartbeat as leader";
+    if(participatingInRAFT)
+        qDebug() << "Sending heartbeat as leader";
+
     for(int i = mySocket->myPortMin; i<= mySocket->myPortMax; i++){
         if(i!= myPort)
             sendAppendEntriesMsg(i, true); //2nd arg: true if heartbeat
@@ -264,11 +269,10 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
     // Rules for All Servers 5.1: If RPC request or response contains term T > currentTerm,
     // set currentTerm = T and convert to follower
     if(leaderTerm > myCurrentTerm){
-        myRole = FOLLOWER;
-        sendHeartbeatTimer->stop();
         myCurrentTerm = leaderTerm;
-        myLeader = leaderID;  // ?????
-        votedFor = -1; // The previous election we voted in is over, reset votedFor so we can vote in the next election
+        myRole = FOLLOWER;
+        votedFor = -1;
+        sendHeartbeatTimer->stop();
         return;
     }
 
@@ -381,21 +385,26 @@ void ChatDialog::replyToAppendEntries(bool success, quint16 prevIndex, quint16 e
 /* Called by leader to process a follower's reply to their AppendEntries message */
 void ChatDialog::processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourcePort){
 
-    //qDebug() << "processAppendEntriesMsgReply";
-
     // Load parameters from message
     quint16 replyTerm = inMap.value("term").toInt();
     bool success = inMap.value("success").toBool();
     quint16 prevIndex = inMap.value("prevIndex").toInt();
     quint16 entryLen = inMap.value("entryLen").toInt();
 
+    QString successString = success ? "true" : "false";
+    if(entryLen == 0)
+        qDebug() << "Received " + successString + " reply to my (heartbeat) Append Entries Msg";
+    else
+        qDebug() << "Received " + successString + " reply to my (non-heartbeat) Append Entries Msg";
+
     // Rules for All Servers 5.1: If RPC request or response contains term T > currentTerm,
     // set currentTerm = T and convert to follower
     if(replyTerm > myCurrentTerm){
         myCurrentTerm = replyTerm;
         myRole = FOLLOWER;
+        votedFor = -1;
         sendHeartbeatTimer->stop();
-        return; // return????
+        return;
     }
 
     if(success){
@@ -404,7 +413,20 @@ void ChatDialog::processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourceP
 
         if(prevMatchIndex < prevIndex + entryLen){
             matchIndex[sourcePort] = prevIndex + entryLen;
+            nextIndex[sourcePort] = matchIndex[sourcePort] + 1;  //????
+
+            if(sourcePort == 36771){
+                qDebug() << "My matchIndex for " + QString::number(sourcePort) + " is " + QString::number(matchIndex[sourcePort]);
+                qDebug() << "My nextIndex for " + QString::number(sourcePort) + " is " + QString::number(nextIndex[sourcePort]);
+            }
+        }
+        else {
             nextIndex[sourcePort] = matchIndex[sourcePort] + 1;
+
+            if(sourcePort == 36771){
+                qDebug() << "My matchIndex for " + QString::number(sourcePort) + " is " + QString::number(matchIndex[sourcePort]);
+                qDebug() << "My nextIndex for " + QString::number(sourcePort) + " is " + QString::number(nextIndex[sourcePort]);
+            }
         }
     }
     else{ // follower replied with false
@@ -433,7 +455,7 @@ void ChatDialog::processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourceP
             if(value <= matchIndexes.value(j))
                 countOfValuesLargerOrEqualTo++;
         }
-        if(countOfValuesLargerOrEqualTo >= 2)     // FOR DEBUGGING, CHANGING FROM 3 to 2
+        if(countOfValuesLargerOrEqualTo >= 3)
             majorityMax= value;
     }
 
@@ -447,6 +469,9 @@ void ChatDialog::processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourceP
     }
 
     while(myLastApplied < myCommitIndex){
+
+        qDebug("Applying to state machine");
+
         QString message = log.value(myLastApplied+1).toMap().value("message").toString();
         QString messageID = log.value(myLastApplied+1).toMap().value("messageID").toString();
         stateMachine.append(message);
@@ -470,7 +495,12 @@ void ChatDialog::gotReturnPressed(){
         return;
     }
 
-    // Store "Client" request
+    textline->clear();
+    processClientRequest(input);
+}
+
+void ChatDialog::processClientRequest(QString input){
+
     QVariantMap clientRequest;
     QString messageID = QString(myPort) + QString(mySeqNo);
     QString message = QString::number(myPort) + ": " + input;
@@ -478,26 +508,86 @@ void ChatDialog::gotReturnPressed(){
 
     clientRequest.insert("type", "clientRequest");
     clientRequest.insert("messageID", messageID);
-    clientRequest.insert("term", myCurrentTerm);
     clientRequest.insert("message", message);
-
     queuedClientRequests.append(clientRequest);
-
-    textline->clear();
 
     if(myRole == LEADER){
         attemptToCommitNextClientRequest();
     }
     else{
-        attemptToForwardNextClientRequest(); // what timer do I use to retry this?
+        attemptToForwardNextClientRequest();
     }
 }
 
 void ChatDialog::processSupportCommand(QString command){
 
-    qDebug() << "Hey, it's a support command: " << command;
+    qDebug() << "------------------------------------------";
+    qDebug() << "Support command: " << command;
 
+    if(command.contains("START")){
+        participatingInRAFT = true;
+    }
+    else if(command.contains("STOP")){
+        participatingInRAFT = false;
+    }
 
+    else if(command.contains("MSG")){
+
+        QString input = command.mid(4, -1);
+        qDebug() << "Support command had message: " + input;
+        processClientRequest(input);
+    }
+
+    else if(command.contains("DROP")){
+
+        QString port = command.mid(4, -1);
+        qDebug() << "Dropping port: " + port;
+        nodesIHaveDropped.append(port.toInt());
+
+    }
+    else if(command.contains("RESTORE")){
+
+        QString port = command.mid(4, -1);
+        qDebug() << "Restoring port: " + port;
+        nodesIHaveDropped.removeOne(port.toInt());
+
+    }
+    else if(command.contains("GET_NODES")){
+
+        // Get all node ids, show Raft state (if leader is elected, provide leader id),
+        // and the state of the current node (follower, leader, candidate);
+
+        QString listOfNodes;
+        for(int i = mySocket->myPortMin; i<= mySocket->myPortMax; i++){
+            listOfNodes.append(QString::number(i) + "  ");
+        }
+        qDebug() << "All node ID's: " + listOfNodes;
+
+        if(myLeader == -1)
+            qDebug() << "I'm not aware of a current leader";
+        else
+            qDebug() << "There is a leader. Leader ID is: " << QString::number(myLeader);
+
+        QString myRoleString;
+        if(myRole == LEADER)
+            myRoleString = "Leader";
+        else if(myRole == CANDIDATE)
+            myRoleString = "Candidate";
+        else
+            myRoleString = "Follower";
+
+        qDebug() << "My state (" + QString::number(myPort) + ") is " + myRoleString;
+
+    }
+    else if(command.contains("GET_CHAT")){
+        for(int i=0; i<stateMachine.length(); i++){
+            qDebug() << stateMachine.value(i);
+        }
+    }
+    else
+        qDebug() << "Invalid support command ";
+
+    qDebug() << "------------------------------------------";
 }
 
 /* Called by follower to forward client requests to leader */
@@ -536,6 +626,7 @@ void ChatDialog::attemptToCommitNextClientRequest(){
     if(!queuedClientRequests.isEmpty()){
 
         QVariantMap nextLogEntry = queuedClientRequests.first().toMap();
+        nextLogEntry.insert("term", myCurrentTerm);
         log.append(nextLogEntry);
         myLastLogIndex++;
         myLastLogTerm = nextLogEntry.value("term").toInt();
@@ -565,8 +656,6 @@ void ChatDialog::removeMessageIDFromQueuedClientRequests(QString messageID){
 
 void ChatDialog::processPendingDatagrams(){
 
-    // Check if we're participating in raft
-
     while(mySocket->hasPendingDatagrams()){
         QByteArray datagram;
         datagram.resize(mySocket->pendingDatagramSize());
@@ -575,9 +664,11 @@ void ChatDialog::processPendingDatagrams(){
 
         if(mySocket->readDatagram(datagram.data(), datagram.size(), &source, &sourcePort) != -1){
 
+            if(!participatingInRAFT)
+                return;
 
-            // Check if I've dropped this source port
-
+            if(nodesIHaveDropped.contains(sourcePort))
+                return;
 
             QDataStream inStream(&datagram, QIODevice::ReadOnly);
             QVariantMap inMap;
@@ -612,7 +703,8 @@ void ChatDialog::processPendingDatagrams(){
 
 void ChatDialog::serializeMessage(QVariantMap &outMap, quint16 destPort){
 
-    // check if we're participating in raft
+    if(!participatingInRAFT)
+        return;
 
     QByteArray outData;
     QDataStream outStream(&outData, QIODevice::WriteOnly);
