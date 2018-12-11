@@ -109,9 +109,9 @@ private:
     void sendAppendEntriesMsg(quint16 destPort, bool heartbeat);
 
     void processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort);
-    void replyToAppendEntries(bool success, quint16 destPort);
+    void replyToAppendEntries(bool success, quint16 prevIndex, quint16 entryLen, quint16 destPort);
     void processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourcePort);
-    void updateCommitIndex();
+
 
     void attemptToCommitMsg();
     void refreshTextView();

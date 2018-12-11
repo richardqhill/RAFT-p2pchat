@@ -226,21 +226,13 @@ void ChatDialog::sendAppendEntriesMsg(quint16 destPort, bool heartbeat){
 
     // Copies a list of values starting at 1st arg, if 2nd arg = -1, copy to end
     // Note, if nextIndexForPort is larger than actual indexes in log, mid fx will return a blank list
-    if(heartbeat){
-        ; //outMap["entries"]; //empty list // ?????????
-    }
-    else{
+    if(!heartbeat){
         QVariantList entries = log.mid(nextIndexForPort, -1);
         outMap.insert(QString("entries"), QVariant(entries));
     }
 
     serializeMessage(outMap, destPort);
 }
-
-
-
-
-
 
 /* Called by follower to process an AppendEntries message from leader */
 void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
@@ -259,7 +251,7 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
         myRole = FOLLOWER;
         sendHeartbeatTimer->stop();
         myCurrentTerm = leaderTerm;
-        myLeader = sourcePort;  // ?????
+        myLeader = leaderID;  // ?????
         votedFor = -1; // The previous election we voted in is over, reset votedFor so we can vote in the next election
         return;
     }
@@ -270,7 +262,7 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
 
     if(leaderTerm < myCurrentTerm){
         qDebug() << "Replied false to Append Entries because my current term > leader term";
-        replyToAppendEntries(false, sourcePort);
+        replyToAppendEntries(false, 0, 0, sourcePort);
         return;
     }
 
@@ -284,7 +276,7 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
         qDebug() << "Replied false to Append Entries because leaderPrevLogIndex longer that my log length";
         qDebug() << "leaderPrevLogIndex: " + QString::number(leaderPrevLogIndex);
         qDebug() << "log.length(): " + QString::number(log.length());
-        replyToAppendEntries(false, sourcePort);
+        replyToAppendEntries(false, 0, 0, sourcePort);
         return;
     }
 
@@ -294,7 +286,7 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
 
     if(myTermAtPrevLogIndex != leaderPrevLogTerm){
         qDebug() << "Replied false to Append Entries b/c terms at prevLogIndex didn't match, need more entries";
-        replyToAppendEntries(false, sourcePort);
+        replyToAppendEntries(false, 0, 0, sourcePort);
         return;
     }
 
@@ -320,32 +312,40 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
                 break;
             }
         }
-
         if(entries.length() > 0){
             log.append(entries);
         }
     }
 
-    if(inMap.contains("entries")){
-        qDebug() << "Append entries (non-heartbeat) success!";
-    }
 
-    replyToAppendEntries(true, sourcePort);
+    // Debugging Print statement
+    if(inMap.contains("entries"))
+        qDebug() << "Append entries (non-heartbeat) success!";
+
+
+    // Update commit index and apply any newly committed entries to the state machine
     quint16 indexOfLastNewEntry = leaderPrevLogIndex + entries.length();
     myCommitIndex = qMin(leaderCommitIndex, indexOfLastNewEntry);
 
-    // if commit index changed, then we should apply stuff to state machine
+    while(myLastApplied < myCommitIndex){
 
-    // use commit index to increase lastApplied
-    updateCommitIndex();
+        QString message = log.value(myLastApplied+1).toMap().value("message").toString();
+        stateMachine.append(message);
+        refreshTextView();
+        myLastApplied++;
+    }
+
+    replyToAppendEntries(true, leaderPrevLogIndex, entries.length(), sourcePort);
 }
 
 /* Helper fx: Called by follower to reply to an AppendEntries message from leader */
-void ChatDialog::replyToAppendEntries(bool success, quint16 destPort){
+void ChatDialog::replyToAppendEntries(bool success, quint16 prevIndex, quint16 entryLen, quint16 destPort){
 
     QVariantMap outMap;
     outMap.insert("type", QVariant("replyToAppendEntries"));
     outMap.insert("term", QVariant(myCurrentTerm));
+    outMap.insert("prevIndex", QVariant(prevIndex));
+    outMap.insert("entryLen", QVariant(entryLen));
 
     if(success) {
         outMap.insert("success", QVariant(true));
@@ -357,54 +357,104 @@ void ChatDialog::replyToAppendEntries(bool success, quint16 destPort){
     serializeMessage(outMap, destPort);
 }
 
-
-
 /* Called by leader to process a follower's reply to their AppendEntries message */
 void ChatDialog::processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourcePort){
 
+    qDebug() << "processAppendEntriesMsgReply";
+
     // Load parameters from message
-    quint16 term = inMap.value("term").toInt();
+    quint16 replyTerm = inMap.value("term").toInt();
     bool success = inMap.value("success").toBool();
+    quint16 prevIndex = inMap.value("prevIndex").toInt();
+    quint16 entryLen = inMap.value("entryLen").toInt();
+
+    // Rules for All Servers 5.1: If RPC request or response contains term T > currentTerm,
+    // set currentTerm = T and convert to follower
+    if(replyTerm > myCurrentTerm){
+        myCurrentTerm = replyTerm;
+        myRole = FOLLOWER;
+        sendHeartbeatTimer->stop();
+        return; // return????
+    }
+
+    if(success){
+        // https://groups.google.com/forum/#!topic/raft-dev/vCJcFi769x4
+        quint16 prevMatchIndex = matchIndex[sourcePort];
+
+        if(prevMatchIndex < prevIndex + entryLen){
+            matchIndex[sourcePort] = prevIndex + entryLen;
+            nextIndex[sourcePort] = matchIndex[sourcePort] + 1;
+        }
+    }
+    else{ // follower replied with false
+        // nextIndex should never decrease past matchIndex
+        if(nextIndex[sourcePort] > matchIndex[sourcePort])
+            nextIndex[sourcePort]--;
+
+        qDebug() << "nextIndex: " + QString::number(nextIndex[sourcePort]);
+        sendAppendEntriesMsg(sourcePort, false);
+    }
+
+    // go through matchIndex
+    QList<quint16> matchIndexes = matchIndex.values();
+    matchIndexes.append(myLastLogIndex);
+    qSort(matchIndexes);
+
+    qDebug() << matchIndex;
+    qDebug() << matchIndexes;
+
+    // By definition of list being sorted, first entry must be valid "majority"
+    quint16 majorityMax = matchIndexes.value(0);
+
+    for(int i=0; i< matchIndexes.length(); i++){
+
+        quint16 value = matchIndexes.value(i);
+        quint16 countOfValuesLargerOrEqualTo = 0;
+
+        for(int j=0; j< matchIndexes.length(); j++){
+            if(value <= matchIndexes.value(j))
+                countOfValuesLargerOrEqualTo++;
+        }
+        if(countOfValuesLargerOrEqualTo >= 2)     // FOR DEBUGGING, CHANGING FROM 3 to 2
+            majorityMax= value;
+    }
+
+    qDebug() << "My N is: " + QString::number(majorityMax);
+
+    if(majorityMax > myCommitIndex){
+        if(log.value(majorityMax).toMap().value("term").toInt() == myCurrentTerm){
+            myCommitIndex = majorityMax;
+        }
+    }
+
+    while(myLastApplied < myCommitIndex){
+
+        QString message = log.value(myLastApplied+1).toMap().value("message").toString();
+        stateMachine.append(message);
+        refreshTextView();
+        myLastApplied++;
+    }
+
 
 
 
     // if rejected because of term inconsistency, step down!
 
 
-    // update nextIndex and matchIndex
     // make sure leader does not update nextIndex past what is possible with log
-
-    // DECIDE IF I NEED TO SEND MORE APPEND ENTRIES with more entries (farther back)
-
-
-    //if true, update matchIndex
-
-
-    //check if majority
 
     // if majority, remove this from
     // apply to state machine, update my commit index
-    // UPDATE COMMIT INDEX PLZ
-    // remove from committed
+
+    // remove from committed, client request? reply to client?
 
 
 
 
-    return;
 }
 
 
 
-
-void ChatDialog::updateCommitIndex(){
-
-    // check matchIndex
-    // update myCommitIndex
-    // update stateMachine
-
-    refreshTextView();
-
-}
 
 
 void ChatDialog::processPendingDatagrams(){
