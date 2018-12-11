@@ -56,6 +56,9 @@ ChatDialog::ChatDialog(){
 /* Called by follower whose waitForHeartbeatTimer timed out. Starts a new election */
 void ChatDialog::sendRequestForVotes(){
 
+    if(!participatingInRAFT)
+        return;
+
     qDebug() << "Sending RequestVote message: attempting to become leader";
     electionTimer->start(timeToWaitForHeartbeat);
 
@@ -251,7 +254,6 @@ void ChatDialog::sendAppendEntriesMsg(quint16 destPort, bool heartbeat){
         outMap.insert(QString("entries"), QVariant(entries));
     }
 
-
     serializeMessage(outMap, destPort);
 }
 
@@ -413,26 +415,24 @@ void ChatDialog::processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourceP
 
         if(prevMatchIndex < prevIndex + entryLen){
             matchIndex[sourcePort] = prevIndex + entryLen;
-            nextIndex[sourcePort] = matchIndex[sourcePort] + 1;  //????
-
-            if(sourcePort == 36771){
-                qDebug() << "My matchIndex for " + QString::number(sourcePort) + " is " + QString::number(matchIndex[sourcePort]);
-                qDebug() << "My nextIndex for " + QString::number(sourcePort) + " is " + QString::number(nextIndex[sourcePort]);
-            }
         }
-        else {
-            nextIndex[sourcePort] = matchIndex[sourcePort] + 1;
 
-            if(sourcePort == 36771){
-                qDebug() << "My matchIndex for " + QString::number(sourcePort) + " is " + QString::number(matchIndex[sourcePort]);
-                qDebug() << "My nextIndex for " + QString::number(sourcePort) + " is " + QString::number(nextIndex[sourcePort]);
-            }
-        }
+        if(nextIndex[sourcePort] == 1)  // ????????????
+            nextIndex[sourcePort]++;
+        else
+            nextIndex[sourcePort] = matchIndex[sourcePort]+1;
+
+//        if(sourcePort == 36771){
+//            qDebug() << "My matchIndex for " + QString::number(sourcePort) + " is " + QString::number(matchIndex[sourcePort]);
+//            qDebug() << "My nextIndex for " + QString::number(sourcePort) + " is " + QString::number(nextIndex[sourcePort]);
+//        }
     }
     else{ // follower replied with false
         // nextIndex should never decrease past matchIndex
         if(nextIndex[sourcePort] > matchIndex[sourcePort])
             nextIndex[sourcePort]--;
+
+
 
         qDebug() << "nextIndex: " + QString::number(nextIndex[sourcePort]);
         sendAppendEntriesMsg(sourcePort, false);
@@ -525,6 +525,8 @@ void ChatDialog::processSupportCommand(QString command){
     qDebug() << "Support command: " << command;
 
     if(command.contains("START")){
+        // Give myself some buffer to receive a heartbeat if there is a current leader
+        electionTimer->start(timeToWaitForHeartbeat);
         participatingInRAFT = true;
     }
     else if(command.contains("STOP")){
@@ -595,7 +597,7 @@ void ChatDialog::attemptToForwardNextClientRequest(){
 
     if(!queuedClientRequests.isEmpty() && myRole != LEADER && myLeader != -1){
 
-        qDebug() << "Forwarding client request to leader";
+        qDebug() << "Forwarding client request to leader " + QString::number(myLeader);
 
         QVariantMap firstClientRequest = queuedClientRequests.first().toMap();
         serializeMessage(firstClientRequest, myLeader);
