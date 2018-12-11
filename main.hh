@@ -21,7 +21,10 @@
 #define CANDIDATE 2
 #define FOLLOWER 3
 
-#define HEARTBEATTIME 50 //msec
+// Change this to 50 msec for must faster distribution of messages
+// Set to 1.5 seconds for this assignment since we must print all raft
+// communications and want to keep things legible.
+#define HEARTBEATTIME 1500 //msec
 
 class NetSocket : public QUdpSocket
 {
@@ -71,13 +74,13 @@ private:
     quint16 myCommitIndex = 0; // Everyone has a dummy entry at log index 0
     quint16 myLastApplied = 0;
 
-    // Log entry should be QVariantMap that stores messageID, term, and message
+    // Log entry should be QVariantMap that stores: messageID, term, and message
     // messageID = concat(myPort, mySeqNo)
-    // Note: at startup, append a "dummy" entry into index 0 of log, so that prevLogIndex checks work
+    // Note: at startup, append a "dummy" entry at index 0 so that prevLogIndex check works
     QVariantList log;
     QVariantList queuedClientRequests;
 
-    // should these be calculated every time? IDK, not sure about thread safety
+    // Could be calculated every time if worried about thread safety
     quint16 myLastLogIndex = 0;
     quint16 myLastLogTerm = 0;
 
@@ -105,14 +108,13 @@ private:
     void processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourcePort);
     void processSupportCommand(QString command);
 
-    void processClientRequestFromFollower(QVariantMap inMap);
+    void processClientRequestFromFollower(QVariantMap inMap, quint16 sourcePort);
     void attemptToCommitNextClientRequest();
     void removeMessageIDFromQueuedClientRequests(QString messageID);
 
     void serializeMessage(QVariantMap &myMap, quint16 destPort);
     void sendMessageToAll(QVariantMap msgMap);
     void refreshTextView();
-
 
 };
 

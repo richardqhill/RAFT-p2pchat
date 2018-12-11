@@ -28,20 +28,17 @@ ChatDialog::ChatDialog(){
 	setLayout(layout);
 
 	// Register a callback on the textline for returnPressed signal
-	connect(textline, SIGNAL(returnPressed()),
-		this, SLOT(gotReturnPressed()));
+	connect(textline, SIGNAL(returnPressed()), this, SLOT(gotReturnPressed()));
 
     // Register a callback when another p2p app sends us a message over UDP
-    connect(mySocket, SIGNAL(readyRead()),
-    		this, SLOT(processPendingDatagrams()));
-
-    // Timeout waiting for leader heartbeat. If no heartbeat within waitForHeartbeat msec, attempt to become leader
-    qsrand(QTime::currentTime().msec());
+    connect(mySocket, SIGNAL(readyRead()), this, SLOT(processPendingDatagrams()));
 
     // Timer if server has not received a heartbeat, they start an election
     electionTimer = new QTimer(this);
     connect(electionTimer, SIGNAL(timeout()), this, SLOT(sendRequestForVotes()));
-    timeToWaitForHeartbeat = qrand() % 150 + 150;
+    qsrand(QTime::currentTime().msec());
+    // Time to wait for heartbeat should be much larger than heartbeat time (currently 1500 msec)
+    timeToWaitForHeartbeat = qrand() % 150 + 2500;
     electionTimer->start(timeToWaitForHeartbeat);
 
     // Timer for leader to keep track of when to send heartbeats.
@@ -52,13 +49,13 @@ ChatDialog::ChatDialog(){
     // Timer if server has not received a heartbeat, they start an election
     forwardClientRequestTimer = new QTimer(this);
     connect(forwardClientRequestTimer, SIGNAL(timeout()), this, SLOT(attemptToForwardNextClientRequest()));
-    forwardClientRequestTimer->start(50);
+    forwardClientRequestTimer->start(1000);
 }
 
 /* Called by follower whose waitForHeartbeatTimer timed out. Starts a new election */
 void ChatDialog::sendRequestForVotes(){
 
-    qDebug() << "Attempting to become leader!";
+    qDebug() << "Sending RequestVote message: attempting to become leader";
 
     myCurrentTerm++;
     nodesThatVotedForMe.clear();
@@ -79,8 +76,6 @@ void ChatDialog::sendRequestForVotes(){
 
 /* Called by follower to process a received a RequestVote message */
 void ChatDialog::processRequestVote(QVariantMap inMap, quint16 sourcePort){
-
-    qDebug()<< "Processing Request Vote";
 
     // Load parameters from message
     quint16 candidateTerm = inMap.value("term").toInt();
@@ -141,7 +136,7 @@ void ChatDialog::replyToRequestForVote(bool voteGranted, quint16 sourcePort){
     outMap.insert("term", QVariant(myCurrentTerm));
 
     if(voteGranted) {
-        qDebug() << "Vote was granted!";
+        qDebug() << "Vote to " + QString::number(sourcePort) + " was granted!";
         outMap.insert("voteGranted", QVariant(true));
     }
     else {
@@ -208,6 +203,7 @@ void ChatDialog::processReplyRequestVote(QVariantMap inMap, quint16 sourcePort){
 /* Called by leader sends a heartbeat to all followers every 50 msec*/
 void ChatDialog::sendHeartbeat(){
 
+    qDebug() << "Sending heartbeat as leader";
     for(int i = mySocket->myPortMin; i<= mySocket->myPortMax; i++){
         if(i!= myPort)
             sendAppendEntriesMsg(i, true); //2nd arg: true if heartbeat
@@ -250,6 +246,7 @@ void ChatDialog::sendAppendEntriesMsg(quint16 destPort, bool heartbeat){
         outMap.insert(QString("entries"), QVariant(entries));
     }
 
+
     serializeMessage(outMap, destPort);
 }
 
@@ -285,11 +282,6 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
         qDebug() << "Replied false to Append Entries because my current term > leader term";
         replyToAppendEntries(false, 0, 0, sourcePort);
         return;
-    }
-
-    if(inMap.contains("entries")){
-        //qDebug() << entries;
-        qDebug() << entries.value(0).toMap().value("message").toString();
     }
 
     // Reply false if log is shorter than prevLogIndex
@@ -342,11 +334,11 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
         }
     }
 
-
     // Debugging Print statement
     if(inMap.contains("entries"))
         qDebug() << "Append entries (non-heartbeat) success!";
-
+    else
+        qDebug() << "Append entries (heartbeat) success!";
 
     // Update commit index and apply any newly committed entries to the state machine
     quint16 indexOfLastNewEntry = leaderPrevLogIndex + entries.length();
@@ -470,16 +462,13 @@ void ChatDialog::processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourceP
 void ChatDialog::gotReturnPressed(){
 
     QString input = textline->text();
-    // NEED TO PARSE FOR SUPPORT COMMANDS
 
-    // is first character < and is last character >
+    // Check for <support command>
     if(input.length() > 0 && input.startsWith("<") && input.endsWith(">")){
         processSupportCommand(input.mid(1, input.length()-2));
         textline->clear();
         return;
     }
-
-
 
     // Store "Client" request
     QVariantMap clientRequest;
@@ -489,7 +478,7 @@ void ChatDialog::gotReturnPressed(){
 
     clientRequest.insert("type", "clientRequest");
     clientRequest.insert("messageID", messageID);
-    clientRequest.insert("term", myCurrentTerm); //Is this included?
+    clientRequest.insert("term", myCurrentTerm);
     clientRequest.insert("message", message);
 
     queuedClientRequests.append(clientRequest);
@@ -499,7 +488,7 @@ void ChatDialog::gotReturnPressed(){
     if(myRole == LEADER){
         attemptToCommitNextClientRequest();
     }
-    else{    // I AM A CLIENT
+    else{
         attemptToForwardNextClientRequest(); // what timer do I use to retry this?
     }
 }
@@ -514,7 +503,7 @@ void ChatDialog::processSupportCommand(QString command){
 /* Called by follower to forward client requests to leader */
 void ChatDialog::attemptToForwardNextClientRequest(){
 
-    if(!queuedClientRequests.isEmpty()) {
+    if(!queuedClientRequests.isEmpty() && myRole != LEADER && myLeader != -1){
 
         qDebug() << "Forwarding client request to leader";
 
@@ -524,7 +513,7 @@ void ChatDialog::attemptToForwardNextClientRequest(){
 }
 
 /* Called by leader to process client request from follower */
-void ChatDialog::processClientRequestFromFollower(QVariantMap inMap){
+void ChatDialog::processClientRequestFromFollower(QVariantMap inMap, quint16 sourcePort){
 
     // Do not add client request if messageID already in state machine or already in queuedClientRequests
     QString messageID = inMap.value("messageID").toString();
@@ -537,7 +526,7 @@ void ChatDialog::processClientRequestFromFollower(QVariantMap inMap){
             return;
     }
 
-    qDebug()<< "I added the forwarded client request to my queuedClientRequests";
+    qDebug()<< "I added client request forwarded from " + QString::number(sourcePort) + " to my queuedClientRequests";
     queuedClientRequests.append(inMap);
 }
 
@@ -551,10 +540,11 @@ void ChatDialog::attemptToCommitNextClientRequest(){
         myLastLogIndex++;
         myLastLogTerm = nextLogEntry.value("term").toInt();
 
-        qDebug() << "myLastLogIndex is now " + QString::number(myLastLogIndex);
-        qDebug() << "myLastLogTerm is now " + QString::number(myLastLogTerm);
+        //qDebug() << "myLastLogIndex is now " + QString::number(myLastLogIndex);
+        //qDebug() << "myLastLogTerm is now " + QString::number(myLastLogTerm);
 
         // Send messages AppendEntries RPC everyone
+        qDebug() << "Sending non-heartbeat Append Entries as leader";
         for(int i = mySocket->myPortMin; i<= mySocket->myPortMax; i++){
             if(i!= myPort)
                 sendAppendEntriesMsg(i, false);
@@ -575,7 +565,7 @@ void ChatDialog::removeMessageIDFromQueuedClientRequests(QString messageID){
 
 void ChatDialog::processPendingDatagrams(){
 
-    // check if we're participating in raft
+    // Check if we're participating in raft
 
     while(mySocket->hasPendingDatagrams()){
         QByteArray datagram;
@@ -586,7 +576,7 @@ void ChatDialog::processPendingDatagrams(){
         if(mySocket->readDatagram(datagram.data(), datagram.size(), &source, &sourcePort) != -1){
 
 
-            // check if I've dropped this source port
+            // Check if I've dropped this source port
 
 
             QDataStream inStream(&datagram, QIODevice::ReadOnly);
@@ -595,28 +585,25 @@ void ChatDialog::processPendingDatagrams(){
 
             if(inMap.contains("type")){
                 if(inMap.value("type") == "requestVote"){
-                    qDebug() << "Received a request vote!";
+                    qDebug() << "Received a request vote from " + QString::number(sourcePort);
                     processRequestVote(inMap, sourcePort);
                 }
 
                 else if(inMap.value("type") == "replyToRequestVote"){
-                    qDebug() << "Received a reply to my request for votes!";
+                    qDebug() << "Received a reply to my request for votes " + QString::number(sourcePort);
                     processReplyRequestVote(inMap, sourcePort);
                 }
 
                 else if(inMap.value("type") == "appendEntries"){
-                    //qDebug() << "Received an Append Entries message!";
                     processAppendEntriesMsg(inMap, sourcePort);
                 }
 
                 else if(inMap.value("type") == "replyToAppendEntries"){
-                    //qDebug() << "Received a reply to my Append Entries message!";
                     processAppendEntriesMsgReply(inMap, sourcePort);
                 }
 
                 else if(inMap.value("type") == "clientRequest"){
-                    qDebug() << "Received a clientRequest from a follower!";
-                    processClientRequestFromFollower(inMap);
+                    processClientRequestFromFollower(inMap, sourcePort);
                 }
             }
         }
