@@ -38,7 +38,7 @@ ChatDialog::ChatDialog(){
     connect(electionTimer, SIGNAL(timeout()), this, SLOT(sendRequestForVotes()));
     qsrand(QTime::currentTime().msec());
     // Time to wait for heartbeat should be much larger than heartbeat time (currently 1500 msec)
-    timeToWaitForHeartbeat = qrand() % 150 + 150;
+    timeToWaitForHeartbeat = qrand() % 1500 + 1500;
     qDebug() << "My election timeout is " + QString::number(timeToWaitForHeartbeat);
     electionTimer->start(timeToWaitForHeartbeat);
 
@@ -50,7 +50,7 @@ ChatDialog::ChatDialog(){
     // Timer if server has not received a heartbeat, they start an election
     forwardClientRequestTimer = new QTimer(this);
     connect(forwardClientRequestTimer, SIGNAL(timeout()), this, SLOT(attemptToForwardNextClientRequest()));
-    forwardClientRequestTimer->start(1000);
+    forwardClientRequestTimer->start(500);
 }
 
 /* Called by follower whose waitForHeartbeatTimer timed out. Starts a new election */
@@ -98,7 +98,7 @@ void ChatDialog::processRequestVote(QVariantMap inMap, quint16 sourcePort){
     }
 
     if(candidateTerm < myCurrentTerm) {
-        qDebug() << "Vote was denied because candidate term is less than mine!";
+        qDebug() << "Vote was denied b/c candidate term is less than mine!";
         replyToRequestForVote(false, sourcePort);
         return;
     }
@@ -106,7 +106,7 @@ void ChatDialog::processRequestVote(QVariantMap inMap, quint16 sourcePort){
     // Check if candidate's log is at least as up-to-date as receiver's log
     if(candidateLastLogTerm < myLastLogTerm ||
     (candidateLastLogTerm==myLastLogTerm && candidateLastLogIndex < myLastLogIndex)){
-        qDebug() << "Vote was denied because candidate's log is not as up to date as mine!";
+        qDebug() << "Vote was denied b/c candidate's log is not as up to date as mine!";
         replyToRequestForVote(false, sourcePort);
         return;
     }
@@ -126,7 +126,7 @@ void ChatDialog::processRequestVote(QVariantMap inMap, quint16 sourcePort){
         return;
     }
     else{
-        qDebug() << "Vote was denied because I have already voted for someone else this term!";
+        qDebug() << "Vote was denied b/c I have already voted for someone else this term!";
         replyToRequestForVote(false, sourcePort);
         return;
     }
@@ -220,6 +220,8 @@ void ChatDialog::sendHeartbeat(){
     // Prevent leader from trying to depose themselves
     electionTimer->start(timeToWaitForHeartbeat);
 
+    // Do not attempt to commit next client request if there are still outstanding entries
+    // in the log that have not yet been committed by a majority of replicas
     if(myCommitIndex == myLastLogIndex){
         attemptToCommitNextClientRequest();
     }
@@ -245,7 +247,6 @@ void ChatDialog::sendAppendEntriesMsg(quint16 destPort, bool heartbeat){
     // prevLogTerm = term of the entry at prevLogIndex
     quint16 myPrevLogTerm = log.value(prevLogIndex).toMap().value("term").toInt();
     outMap.insert(QString("prevLogTerm"), QVariant(myPrevLogTerm));
-    //qDebug() << "The prevLogTerm to the entries is: " + QString::number(myPrevLogTerm);    // Come back and check this once we are updating nextIndex
 
     // Copies a list of values starting at 1st arg, if 2nd arg = -1, copy to end
     // Note, if nextIndexForPort is larger than actual indexes in log, mid fx will return a blank list
@@ -285,23 +286,20 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
     }
 
     if(leaderTerm < myCurrentTerm){
-        qDebug() << "Replied false to Append Entries because my current term > leader term";
+        qDebug() << "Replied false to Append Entries b/c my current term > leader term";
         replyToAppendEntries(false, 0, 0, sourcePort);
         return;
     }
 
     // Reply false if log is shorter than prevLogIndex
     if(leaderPrevLogIndex >= log.length()){
-        qDebug() << "Replied false to Append Entries because leaderPrevLogIndex longer that my log length";
-        qDebug() << "leaderPrevLogIndex: " + QString::number(leaderPrevLogIndex);
-        qDebug() << "log.length(): " + QString::number(log.length());
+        qDebug() << "Replied false to Append Entries b/c leaderPrevLogIndex longer than my log length";
         replyToAppendEntries(false, 0, 0, sourcePort);
         return;
     }
 
     // Reply false if log doesn't contain an entry at prevLogIndex whose term matches prevLogTerm
     quint16 myTermAtPrevLogIndex = log.at(leaderPrevLogIndex).toMap().value("term").toInt();
-    //qDebug() << "myTermAtPrevLogIndex: " + QString::number(myTermAtPrevLogIndex);     // Come back and check this once we are updating nextIndex
 
     if(myTermAtPrevLogIndex != leaderPrevLogTerm){
         qDebug() << "Replied false to Append Entries b/c terms at prevLogIndex didn't match, need more entries";
@@ -340,7 +338,6 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
         }
     }
 
-    // Debugging Print statement
     if(inMap.contains("entries"))
         qDebug() << "Append entries (non-heartbeat) success!";
     else
@@ -361,7 +358,6 @@ void ChatDialog::processAppendEntriesMsg(QVariantMap inMap, quint16 sourcePort){
 
         removeMessageIDFromQueuedClientRequests(messageID);
     }
-
     replyToAppendEntries(true, leaderPrevLogIndex, entries.length(), sourcePort);
 }
 
@@ -395,9 +391,9 @@ void ChatDialog::processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourceP
 
     QString successString = success ? "true" : "false";
     if(entryLen == 0)
-        qDebug() << "Received " + successString + " reply to my (heartbeat) Append Entries Msg";
+        qDebug() << "Leader: Received " + successString + " reply to my (heartbeat) Append Entries Msg";
     else
-        qDebug() << "Received " + successString + " reply to my (non-heartbeat) Append Entries Msg";
+        qDebug() << "Leader: Received " + successString + " reply to my (non-heartbeat) Append Entries Msg";
 
     // Rules for All Servers 5.1: If RPC request or response contains term T > currentTerm,
     // set currentTerm = T and convert to follower
@@ -411,39 +407,32 @@ void ChatDialog::processAppendEntriesMsgReply(QVariantMap inMap, quint16 sourceP
 
     if(success){
         // https://groups.google.com/forum/#!topic/raft-dev/vCJcFi769x4
-        quint16 prevMatchIndex = matchIndex[sourcePort];
 
-        if(prevMatchIndex < prevIndex + entryLen){
+        // Match Index shouldn't ever decrease
+        if(prevIndex + entryLen > matchIndex[sourcePort]){
             matchIndex[sourcePort] = prevIndex + entryLen;
         }
 
-        if(nextIndex[sourcePort] == 1)  // ????????????
+        if(nextIndex[sourcePort] == 1)  // Necessary because log index 0 is a dummy index
             nextIndex[sourcePort]++;
         else
-            nextIndex[sourcePort] = matchIndex[sourcePort]+1;
-
-//        if(sourcePort == 36771){
-//            qDebug() << "My matchIndex for " + QString::number(sourcePort) + " is " + QString::number(matchIndex[sourcePort]);
-//            qDebug() << "My nextIndex for " + QString::number(sourcePort) + " is " + QString::number(nextIndex[sourcePort]);
-//        }
+            nextIndex[sourcePort] = matchIndex[sourcePort] + 1;
     }
     else{ // follower replied with false
         // nextIndex should never decrease past matchIndex
         if(nextIndex[sourcePort] > matchIndex[sourcePort])
             nextIndex[sourcePort]--;
 
-
-
-        qDebug() << "nextIndex: " + QString::number(nextIndex[sourcePort]);
+        //qDebug() << "nextIndex: " + QString::number(nextIndex[sourcePort]);
         sendAppendEntriesMsg(sourcePort, false);
     }
 
-    // go through matchIndex
+    // See if we can update commit index based on content of matchIndex
     QList<quint16> matchIndexes = matchIndex.values();
     matchIndexes.append(myLastLogIndex);
     qSort(matchIndexes);
 
-    // By definition of list being sorted, first entry must be valid "majority"
+    // By definition of list being sorted, first entry must be a valid "min majority"
     quint16 majorityMax = matchIndexes.value(0);
 
     for(int i=0; i< matchIndexes.length(); i++){
@@ -506,6 +495,8 @@ void ChatDialog::processClientRequest(QString input){
     QString message = QString::number(myPort) + ": " + input;
     mySeqNo++;
 
+    // Do NOT include term here. Term should be inserted by leader when
+    // they are attempting to commit it to their log
     clientRequest.insert("type", "clientRequest");
     clientRequest.insert("messageID", messageID);
     clientRequest.insert("message", message);
@@ -595,6 +586,9 @@ void ChatDialog::processSupportCommand(QString command){
 /* Called by follower to forward client requests to leader */
 void ChatDialog::attemptToForwardNextClientRequest(){
 
+    if(!participatingInRAFT)
+        return;
+
     if(!queuedClientRequests.isEmpty() && myRole != LEADER && myLeader != -1){
 
         qDebug() << "Forwarding client request to leader " + QString::number(myLeader);
@@ -632,9 +626,6 @@ void ChatDialog::attemptToCommitNextClientRequest(){
         log.append(nextLogEntry);
         myLastLogIndex++;
         myLastLogTerm = nextLogEntry.value("term").toInt();
-
-        //qDebug() << "myLastLogIndex is now " + QString::number(myLastLogIndex);
-        //qDebug() << "myLastLogTerm is now " + QString::number(myLastLogTerm);
 
         // Send messages AppendEntries RPC everyone
         qDebug() << "Sending non-heartbeat Append Entries as leader";

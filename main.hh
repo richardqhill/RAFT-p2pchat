@@ -24,7 +24,7 @@
 // Change this to 50 msec for must faster distribution of messages
 // Set to 1.5 seconds for this assignment since we must print all raft
 // communications and want to keep things legible.
-#define HEARTBEATTIME 50 //msec
+#define HEARTBEATTIME 1000 //msec
 
 class NetSocket : public QUdpSocket
 {
